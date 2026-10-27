@@ -98,6 +98,8 @@ h2 .link{border:0;background:none;color:var(--pink);font-weight:700;font-size:13
 .todo .go{color:var(--pink);font-weight:700;font-size:13px}
 .seg{display:grid;grid-template-columns:1fr 1fr;background:var(--surface2);border-radius:14px;padding:4px;gap:4px}
 .seg button{border:0;border-radius:11px;padding:10px;background:transparent;font-weight:700;font-size:14px;color:var(--ink2)}
+.seg3{grid-template-columns:1fr 1fr 1fr}
+.seg3 button{padding:10px 4px;font-size:13px}
 .seg button.on{background:var(--surface);color:var(--ink);box-shadow:0 2px 6px rgba(0,0,0,.08)}
 
 /* payday */
@@ -471,13 +473,19 @@ const CARD_TEMPLATES = ['楽天カード','三井住友カード','イオンカ�
 const BANK_TEMPLATES = ['ゆうちょ銀行','三菱UFJ銀行','三井住友銀行','みずほ銀行','りそな銀行','楽天銀行','住信SBI','PayPay銀行'];
 const FIXED_TEMPLATES = [
   {n:'電気代', e:'💡'}, {n:'ガス代', e:'🔥'}, {n:'水道代', e:'💧'}, {n:'保育料', e:'🧸'}, {n:'ケータイ代', e:'📱'},
-  {n:'副業経費', e:'💼'}, {n:'学資', e:'🎓'}, {n:'保険料', e:'🛡️'}, {n:'家ローン', e:'🏠'}, {n:'積立投資', e:'🌱'},
+  {n:'副業経費', e:'💼'}, {n:'学資', e:'🎓', vary:true}, {n:'保険料', e:'🛡️'}, {n:'家ローン', e:'🏠'}, {n:'積立投資', e:'🌱'},
   {n:'ガソリン代', e:'⛽'}, {n:'サブスク代', e:'📺'}, {n:'固定資産税', e:'🏡', year:true}, {n:'市民税', e:'🏛️'}, {n:'車税', e:'🚗', year:true},
   {n:'ネット代', e:'🌐'}, {n:'駐車場', e:'🅿️'}, {n:'習いごと', e:'🎹'},
 ];
 const FIXED_EMOJI = Object.fromEntries(FIXED_TEMPLATES.map(t => [t.n, t.e]));
 const fixedEmoji = f => f.emoji || FIXED_EMOJI[f.name] || '📌';
-const monthlyOf = f => f.freq === 'year' ? Math.round((Number(f.amount)||0) / 12) : (Number(f.amount)||0);
+const fixmOf = (f, ym) => (S.fixm || []).find(x => x.month === ym && x.fixedId === f.id);
+/* 年払いは月割り、「毎月かわる」はその月に入れた金額（なければ目安） */
+const monthlyOf = (f, ym = S.month) => {
+  if (f.freq === 'year') return Math.round((Number(f.amount)||0) / 12);
+  if (f.freq === 'vary') { const m = fixmOf(f, ym); if (m) return Number(m.amount) || 0; }
+  return Number(f.amount) || 0;
+};
 const WD = ['日','月','火','水','木','金','土'];
 const PIG_LINES = ['ぶひっ！','きょうもえらい！','ちょきん だいすき','つばさ、ファイト！','りさこ、いつもありがと','むだづかい はんたーい','ごはん なににする？','おなか いっぱい ¥'];
 const JOBDEF = {wage:0, ot:1.25, goal:0, day:0, allow:0, use:'worked'};
@@ -490,7 +498,7 @@ const curYM = todayStr.slice(0,7);
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const S = {
-  settings: clone(DEF), works: [], workWho: lsGet('futari-workwho') === 'a' ? 'a' : 'b', fixed: [], cards: [], tx: [], bills: [], pays: [], accounts: [],
+  settings: clone(DEF), works: [], fixm: [], workWho: lsGet('futari-workwho') === 'a' ? 'a' : 'b', fixed: [], cards: [], tx: [], bills: [], pays: [], accounts: [],
   month: curYM, txMonths: [], tab: 'home', whoFilter: 'all',
   me: lsGet('futari-me'), local: false, readonly: false, sayIdx: 0,
 };
@@ -785,8 +793,21 @@ async function init(){
     db = RemoteDB(key);
   }
   renderBanner();
-  db.doc('settings/main').onSnapshot(s => {
-    const d = s.exists ? s.data() : {};
+  startSubs();
+  db.doc('settings/main').onSnapshot(s => { baseSettings = s.exists ? s.data() : {}; rebuildSettings(); }, onErr);
+  db.collection('conf').onSnapshot(q => { confDocs = rows(q); rebuildSettings(); }, onErr);
+  db.collection('fixm').onSnapshot(q => { S.fixm = rows(q); schedule(); }, onErr);
+}
+/* 設定は settings/main（前からのぶん）の上に、項目ごとのデータ conf/<項目> を重ねてつくる */
+let baseSettings = {}, confDocs = [];
+function rebuildSettings(){
+  {
+    const d = clone(baseSettings || {});
+    confDocs.forEach(c => {
+      const ks = String(c.id).split('.'); let o = d;
+      for (let i = 0; i < ks.length - 1; i++) { if (!o[ks[i]] || typeof o[ks[i]] !== 'object') o[ks[i]] = {}; o = o[ks[i]]; }
+      o[ks[ks.length - 1]] = c.v;
+    });
     S.settings = {
       names: {...DEF.names, ...(d.names||{})},
       income: {...DEF.income, ...(d.income||{})},
@@ -794,7 +815,9 @@ async function init(){
       saving: Number(d.saving)||0, carry: !!d.carry,
     };
     schedule();
-  }, onErr);
+  }
+}
+function startSubs(){
   const byAt = (a,b) => (a.at||0) - (b.at||0);
   db.collection('fixed').onSnapshot(q => { S.fixed = rows(q).sort(byAt); schedule(); }, onErr);
   db.collection('cards').onSnapshot(q => { S.cards = rows(q).sort(byAt); schedule(); }, onErr);
@@ -834,7 +857,7 @@ function billOf(ym, card){
 function monthPlan(ym){
   const ia = incomeOf(ym, 'a'), ib = incomeOf(ym, 'b');
   const income = ia.v + ib.v;
-  const fixed = sum(S.fixed, monthlyOf);
+  const fixed = sum(S.fixed, f => monthlyOf(f, ym));
   const saving = Number(S.settings.saving)||0;
   const cards = S.cards.map(c => ({c, ...billOf(ym, c)}));
   const bills = sum(cards, x => x.v);
@@ -1286,7 +1309,7 @@ function kidsOf(ym){
   const list = spentOf(ym).list;
   return ['k1','k2'].map(k => {
     const tx = sum(list, t => kidShare(t, k, Number(t.amount)||0));
-    const fixed = sum(S.fixed, f => kidShare(f, k, monthlyOf(f)));
+    const fixed = sum(S.fixed, f => kidShare(f, k, monthlyOf(f, ym)));
     const cats = CATS.map(c => ({c, v: sum(list.filter(t => t.cat === c.id), t => kidShare(t, k, Number(t.amount)||0))})).filter(x => x.v > 0).sort((a,b) => b.v - a.v);
     return {k, tx: Math.round(tx), fixed: Math.round(fixed), total: Math.round(tx + fixed), cats};
   });
@@ -1310,20 +1333,26 @@ function vKids(){
     <div class="note">きろくや固定費で「こどもの分」をえらぶと集計されます。「みづき・かなみ」の分は半分ずつで計算しています。</div></section>`;
 }
 function vBillTodo(){
-  if (S.month !== curYM || !S.cards.length) return '';
+  if (S.month !== curYM) return '';
+  const vary = S.fixed.filter(f => f.freq === 'vary' && !fixmOf(f, curYM));
+  const varyHtml = vary.length ? `<div class="bt-g">毎月かわる固定費（${mShort(curYM)}）</div>${vary.map(f => `<div class="bt-row">
+      <span class="bt-c" style="background:var(--butter)"></span>
+      <span class="bt-n"><b>${esc(fixedEmoji(f))} ${esc(f.name)}</b><small>${f.amount ? `入れるまでは目安 ${yen(f.amount)} で計算` : 'まだ金額がないよ'}</small></span>
+      <button type="button" class="chip on" data-act="padset" data-target="fixm:${curYM}:${esc(f.id)}" data-kind="yen" data-title="${esc(f.name)}・${mShort(curYM)}の金額" data-v="">金額を入れる</button></div>`).join('')}` : '';
+  if (!S.cards.length) return varyHtml ? `<section class="card billtodo"><h2>📝 今月の金額を入れよう</h2>${varyHtml}</section>` : '';
   const N = addMonth(curYM, 1);
   const mineFirst = (a, b) => ((b.owner === S.me) - (a.owner === S.me));
   const has = (m, c) => S.bills.some(b => b.month === m && b.cardId === c.id);
   const groups = [{m: curYM, t: `${mShort(curYM)}に引き落とされる分`}];
   if (today.getDate() >= 10) groups.push({m: N, t: `${mShort(N)}に引き落とされる分（明細が届いたら）`});
   const body = groups.map(g => ({...g, cards: S.cards.filter(c => !has(g.m, c)).sort(mineFirst)})).filter(g => g.cards.length);
-  if (!body.length) return '';
-  return `<section class="card billtodo"><h2>💳 カード明細を入れよう</h2>
+  if (!body.length && !varyHtml) return '';
+  return `<section class="card billtodo"><h2>${body.length ? '💳 カード明細を入れよう' : '📝 今月の金額を入れよう'}</h2>${varyHtml}
     ${body.map(g => `<div class="bt-g">${g.t}</div>${g.cards.map(c => `<div class="bt-row">
       <span class="bt-c" style="background:${esc(c.color || CARD_COLORS[0])}"></span>
       <span class="bt-n"><b>${esc(c.name)}</b><small>${esc(name(c.owner))}のカード${c.day ? `・${esc(c.day)}日` : ''}</small></span>
       <button type="button" class="chip on" data-act="padset" data-target="bill:${g.m}:${esc(c.id)}" data-kind="yen" data-title="${esc(c.name)}・${mShort(g.m)}の引き落とし額">金額を入れる</button></div>`).join('')}`).join('')}
-    <div class="note">明細の「ご請求金額」を入れてね。入れると来月のよゆうが「確定」になります。</div></section>`;
+    ${body.length ? '<div class="note">明細の「ご請求金額」を入れてね。入れると来月のよゆうが「確定」になります。</div>' : ''}</section>`;
 }
 function vAssetsMini(){
   if (!S.accounts.length) return '';
@@ -1446,13 +1475,13 @@ function vSettings(){
   </section>
   <section class="card" id="fixed-sec"><h2>固定費 <span><span class="num" style="color:var(--ink)">${yen(fixedTotal)}</span><span style="font-weight:500"> / 月</span></span></h2>
     ${S.fixed.map(f => `<button type="button" class="fixed-row" data-act="editfixed" data-id="${esc(f.id)}">
-      <span><span class="fx-e">${esc(fixedEmoji(f))}</span>${esc(f.name)}${f.freq === 'year' ? '<span class="tag est">年払い</span>' : ''}${f.kid ? `<span class="tag ok">👧${esc(kidName(f.kid))}</span>` : ''}${f.day ? `<small>${esc(f.day)}日</small>` : ''}</span>
-      <span class="num">${yen(monthlyOf(f))}${f.freq === 'year' ? `<small class="fx-y">年 ${yen(f.amount)}</small>` : ''}</span></button>`).join('')
+      <span><span class="fx-e">${esc(fixedEmoji(f))}</span>${esc(f.name)}${f.freq === 'year' ? '<span class="tag est">年払い</span>' : f.freq === 'vary' ? '<span class="tag est">毎月かわる</span>' : ''}${f.kid ? `<span class="tag ok">👧${esc(kidName(f.kid))}</span>` : ''}${f.day ? `<small>${esc(f.day)}日</small>` : ''}</span>
+      <span class="num">${yen(monthlyOf(f))}${f.freq === 'year' ? `<small class="fx-y">年 ${yen(f.amount)}</small>` : f.freq === 'vary' ? `<small class="fx-y">${fixmOf(f, S.month) ? `${mShort(S.month)}の金額` : '目安'}</small>` : ''}</span></button>`).join('')
       || '<p class="note" style="margin-top:0">毎月決まって出ていくお金を入れてね。下の項目をタップすると、すぐ金額を入れられるよ。</p>'}
     ${tpls.length ? `<div class="fx-add-t">タップして追加</div>
     <div class="chips">${tpls.map(t => `<button type="button" class="chip fx-chip" data-act="quickfixed" data-v="${esc(t.n)}">${t.e} ${esc(t.n)}<b>＋</b></button>`).join('')}</div>` : ''}
     <div style="margin-top:12px"><button type="button" class="btn ghost" data-act="newfixed">＋ じぶんで項目をつくる</button></div>
-    <div class="note">固定資産税や車税のような年払いは、年の金額を入れると月割りで計算するよ。</div>
+    <div class="note">固定資産税や車税のような年払いは、年の金額を入れると月割りで計算するよ。学資保険のように金額が毎月かわるものは「毎月かわる」にすると、月ごとに金額を入れられます（入れない月は目安で計算）。</div>
   </section>
   <section class="card stack"><h2 style="margin:0">家族の名前</h2>
     <div class="grid2">
@@ -1475,7 +1504,7 @@ let pad = null;
 function openPad(o){
   const hmKind = o.kind === 'hm' || o.kind === 'hday';
   const v0 = Number(o.value) || 0;
-  pad = {...o, hmKind, s: !o.value ? '' : hmKind ? `${Math.floor(v0/60)}${pad2(v0%60)}` : String(o.value)};
+  pad = {...o, hmKind, fresh: !!o.value, s: !o.value ? '' : hmKind ? `${Math.floor(v0/60)}${pad2(v0%60)}` : String(o.value)};
   const keys = ['1','2','3','4','5','6','7','8','9', o.kind === 'day' || hmKind ? '' : o.kind === 'dec' ? '.' : '00', '0', 'del'];
   const host = document.getElementById('padHost');
   host.innerHTML = `<div class="pscrim" data-act="padclose"></div>
@@ -1498,6 +1527,9 @@ function updPad(bump = true){
 }
 function padKey(k){
   if (!pad) return;
+  // 前の金額が入っているときは、最初に押した数字で入れ替える（電卓と同じ）
+  if (pad.fresh && k !== 'del') pad.s = '';
+  pad.fresh = false;
   if (k === 'del') pad.s = pad.s.slice(0, -1);
   else {
     if (pad.kind === 'dec') { if (k === '.' ? !pad.s.includes('.') && pad.s : pad.s.length < 5) pad.s += k; updPad(); return; }
@@ -1551,10 +1583,10 @@ function payHint(){
 
 function fixedHint(){
   if (!sheetCtx || sheetCtx.kind !== 'fixed') return;
-  const y = sheetCtx.freq === 'year';
+  const fq = sheetCtx.freq;
   const l = sq('#x-amt-l'), h = sq('#x-hint');
-  if (l) l.textContent = y ? '1年の金額' : '毎月の金額';
-  if (h) { h.hidden = !y; h.textContent = `月割り ${yen(Math.round((Number(sheetCtx.amount)||0)/12))} で計算するよ`; }
+  if (l) l.textContent = fq === 'year' ? '1年の金額' : fq === 'vary' ? '目安の金額（なくてもOK）' : '毎月の金額';
+  if (h) { h.hidden = fq === 'month'; h.textContent = fq === 'vary' ? '月ごとの金額は、ホームの「今月の金額を入れよう」から入れてね。入れない月は目安で計算するよ' : `月割り ${yen(Math.round((Number(sheetCtx.amount)||0)/12))} で計算するよ`; }
 }
 function txSheet(t){
   const isNew = !t;
@@ -1638,18 +1670,20 @@ function acctSheet(a){
 function fixedSheet(f){
   const isNew = !f;
   f = f || {name:'', amount:0, day:0, freq:'month'};
-  const fq = f.freq === 'year' ? 'year' : 'month';
+  const fq = f.freq === 'year' || f.freq === 'vary' ? f.freq : 'month';
+  const fm = !isNew && fq === 'vary' ? fixmOf(f, S.month) : null;
   openSheet(`
     <h3>${isNew ? '固定費を追加' : `${esc(fixedEmoji(f))} 固定費を編集`}</h3>
     <div class="stack">
       <div class="field"><label for="x-name">なまえ</label><input class="in" id="x-name" value="${esc(f.name)}" placeholder="ペット保険 など" maxlength="20" enterkeyhint="done"></div>
-      <div class="field"><span class="lb">払いかた</span><div class="seg"><button type="button" data-pick="freq" data-v="month" class="${fq==='month'?'on':''}">毎月</button><button type="button" data-pick="freq" data-v="year" class="${fq==='year'?'on':''}">年払い</button></div></div>
+      <div class="field"><span class="lb">払いかた</span><div class="seg seg3"><button type="button" data-pick="freq" data-v="month" class="${fq==='month'?'on':''}">毎月おなじ</button><button type="button" data-pick="freq" data-v="vary" class="${fq==='vary'?'on':''}">毎月かわる</button><button type="button" data-pick="freq" data-v="year" class="${fq==='year'?'on':''}">年払い</button></div></div>
       <div class="grid2">
-        <div class="field"><span class="lb" id="x-amt-l">${fq === 'year' ? '1年の金額' : '毎月の金額'}</span>${sheetNum('amount', 'yen', `${f.name || '固定費'}の金額`, f.amount, false)}</div>
+        <div class="field"><span class="lb" id="x-amt-l">${fq === 'year' ? '1年の金額' : fq === 'vary' ? '目安の金額（なくてもOK）' : '毎月の金額'}</span>${sheetNum('amount', 'yen', `${f.name || '固定費'}の金額`, f.amount, false)}</div>
         <div class="field"><span class="lb">支払い日</span>${sheetNum('day', 'day', '支払い日', f.day, false)}</div>
       </div>
       <div class="field"><span class="lb">こどもの分（保育料・学資など）</span><div class="chips">${kidChips(f.kid || '')}</div></div>
-      <div class="hint" id="x-hint" ${fq === 'year' ? '' : 'hidden'}>月割り ${yen(Math.round((Number(f.amount)||0)/12))} で計算するよ</div>
+      <div class="hint" id="x-hint" ${fq === 'month' ? 'hidden' : ''}>${fq === 'vary' ? '月ごとの金額は、ホームの「今月の金額を入れよう」から入れてね。入れない月は目安で計算するよ' : `月割り ${yen(Math.round((Number(f.amount)||0)/12))} で計算するよ`}</div>
+      ${!isNew && fq === 'vary' ? `<div class="field"><span class="lb">${mShort(S.month)}の金額</span>${numBtn(`fixm:${S.month}:${esc(f.id)}`, 'yen', `${f.name}・${mShort(S.month)}の金額`, fm ? fm.amount : '', 'タップして入力')}</div>` : ''}
       ${isNew ? '<button type="button" class="btn" data-act="savefixed">追加する</button>'
         : '<div class="btn-row"><button type="button" class="btn danger" data-act="delfixed">削除</button><button type="button" class="btn" data-act="savefixed">保存する</button></div>'}
     </div>`, {kind:'fixed', id: f.id, amount: Number(f.amount)||0, day: Number(f.day)||0, freq: fq, emoji: f.emoji || '', kid: f.kid || ''});
@@ -1670,9 +1704,10 @@ function toast(msg){
   t.textContent = msg; t.classList.add('show');
   clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2200);
 }
-function saveSettings(){
-  const body = clone(S.settings);
-  write(() => db.doc('settings/main').set(body));
+function getPath(o, path){ return path.split('.').reduce((x, k) => x == null ? x : x[k], o); }
+function saveSetting(path){
+  const v = getPath(S.settings, path);
+  write(() => db.collection('conf').doc(path).set({v: v === undefined ? null : v, who: S.me || '', at: Date.now()}));
 }
 function setMonth(ym){ S.month = ym; S.tx = []; S.txMonths = []; render(); subTx(); }
 
@@ -1683,7 +1718,16 @@ function padTarget(target, v){
     const ks = rest.split('.'); let o = S.settings;
     for (let i = 0; i < ks.length - 1; i++) o = o[ks[i]];
     o[ks[ks.length - 1]] = v;
-    saveSettings(); render(); toast('保存しました');
+    saveSetting(rest); render(); toast('保存しました');
+  } else if (kind === 'fixm') {
+    const [, month, fixedId] = target.split(':');
+    const f = S.fixed.find(x => x.id === fixedId);
+    const ref = db.collection('fixm').doc(`${month}_${fixedId}`);
+    if (v) write(() => ref.set({month, fixedId, amount: v, who: S.me || 'a', at: Date.now()}));
+    else write(() => ref.delete());
+    burst([(f && fixedEmoji(f)) || '📌', '✨']);
+    toast(v ? `${f ? f.name : '固定費'}・${mShort(month)}は ${yen(v)} で計算するよ` : '目安の金額にもどしました');
+    setTimeout(render, 50);
   } else if (kind === 'bill') {
     const parts = target.split(':');
     const month = parts.length === 3 ? parts[1] : S.month, cardId = parts.length === 3 ? parts[2] : rest;
@@ -1744,7 +1788,7 @@ document.addEventListener('click', e => {
     toast(`${n}件 取りこみました`); burst(['📦','✨']);
   }
   else if (a === 'workwho') { S.workWho = v; lsSet('futari-workwho', v); render(); }
-  else if (a === 'jobset') { const j = S.settings.job[S.workWho]; j[el.dataset.k] = el.dataset.k === 'ot' ? Number(v) : v; saveSettings(); render(); }
+  else if (a === 'jobset') { const j = S.settings.job[S.workWho]; j[el.dataset.k] = el.dataset.k === 'ot' ? Number(v) : v; saveSetting(`job.${S.workWho}.${el.dataset.k}`); render(); }
   else if (a === 'harmos') {
     const ta = document.getElementById('hm-paste');
     const got = parseHarmos(ta ? ta.value : '');
@@ -1754,7 +1798,7 @@ document.addEventListener('click', e => {
   }
   else if (a === 'setme') { S.me = v; lsSet('futari-me', v); render(); burst(['💗','✨']); toast(`${name(v)}として入力します`); }
   else if (a === 'whof') { S.whoFilter = v; render(); }
-  else if (a === 'carry') { S.settings.carry = !S.settings.carry; saveSettings(); render(); }
+  else if (a === 'carry') { S.settings.carry = !S.settings.carry; saveSetting('carry'); render(); }
   else if (a === 'todo') {
     if (v === 'me') { S.tab = 'settings'; render(); }
     else if (v === 'card') cardSheet();
@@ -1788,10 +1832,10 @@ document.addEventListener('click', e => {
   else if (a === 'quickfixed') {
     const t = FIXED_TEMPLATES.find(t => t.n === v); if (!t) return;
     const xy = lastXY;
-    openPad({title: `${t.e} ${t.n}の${t.year ? '1年の' : '毎月の'}金額`, kind:'yen', value:'', hint: t.year ? '年の金額を入れると、月割りで計算するよ' : '',
+    openPad({title: `${t.e} ${t.n}の${t.year ? '1年の' : t.vary ? '目安の' : '毎月の'}金額`, kind:'yen', value:'', hint: t.year ? '年の金額を入れると、月割りで計算するよ' : t.vary ? '毎月かわる固定費になります。月ごとの金額はあとで入れられるよ' : '',
       onDone: val => {
-        if (!val) return;
-        const body = {name: t.n, amount: val, freq: t.year ? 'year' : 'month', day: '', emoji: t.e, at: Date.now()};
+        if (!val && !t.vary) return;
+        const body = {name: t.n, amount: val, freq: t.year ? 'year' : t.vary ? 'vary' : 'month', day: '', emoji: t.e, at: Date.now()};
         write(() => db.collection('fixed').doc().set(body));
         burst([t.e, '✨', '🪙'], 12, xy);
         toast(`${t.n} ${yen(val)}${t.year ? '（年）' : ''} を追加したよ`);
@@ -1846,9 +1890,9 @@ document.addEventListener('click', e => {
   else if (a === 'savefixed') {
     const nm = sq('#x-name').value.trim().slice(0,20);
     const amount = Number(sheetCtx.amount) || 0;
-    if (!nm || !amount) { toast('なまえと金額を入れてね'); return; }
+    if (!nm || (!amount && sheetCtx.freq !== 'vary')) { toast('なまえと金額を入れてね'); return; }
     const prev = sheetCtx.id ? S.fixed.find(f => f.id === sheetCtx.id) : null;
-    const body = {name: nm, amount, freq: sheetCtx.freq === 'year' ? 'year' : 'month', day: Number(sheetCtx.day) || '', emoji: sheetCtx.emoji || FIXED_EMOJI[nm] || '', kid: sheetCtx.kid || '', at: prev ? prev.at : Date.now()};
+    const body = {name: nm, amount, freq: ['year','vary'].includes(sheetCtx.freq) ? sheetCtx.freq : 'month', day: Number(sheetCtx.day) || '', emoji: sheetCtx.emoji || FIXED_EMOJI[nm] || '', kid: sheetCtx.kid || '', at: prev ? prev.at : Date.now()};
     const ref = sheetCtx.id ? db.collection('fixed').doc(sheetCtx.id) : db.collection('fixed').doc();
     write(() => ref.set(body)); burst([body.emoji || '📌','✨','🪙']); closeSheet(); toast(prev ? '保存しました' : '固定費を追加しました');
   }
@@ -1861,7 +1905,7 @@ document.addEventListener('change', e => {
   if (el.dataset.set) {
     const [k1, k2] = el.dataset.set.split('.');
     if (k2) S.settings[k1][k2] = el.value.trim().slice(0,10); else S.settings[k1] = el.value.trim().slice(0,30);
-    saveSettings(); toast('保存しました');
+    saveSetting(el.dataset.set); toast('保存しました');
   }
 });
 document.addEventListener('keydown', e => {
