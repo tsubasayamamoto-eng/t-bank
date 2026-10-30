@@ -241,6 +241,24 @@ textarea.in{resize:vertical;min-height:96px;font-size:15px;line-height:1.5}
 .cmp-diff{font-size:12px;font-weight:600;color:var(--ink2);white-space:nowrap}
 .cmp-diff.up{color:var(--danger)} .cmp-diff.down{color:var(--mint)}
 
+/* payday */
+.payday-card{display:grid;gap:8px;background:linear-gradient(160deg,var(--butter-soft),var(--surface) 85%);border-radius:var(--r);padding:14px;box-shadow:var(--shadow)}
+.pd-head{display:flex;gap:10px;align-items:center}
+.pd-head .pigbtn svg{width:56px;height:auto}
+.pd-head b{display:block;font-size:17px}
+.pd-head span{font-size:13px;font-weight:700;color:var(--ink2)}
+.payday .go{margin-left:auto;font-size:22px}
+.payday.mine{outline:3px solid var(--pink);outline-offset:2px}
+.pd-soon{font-size:13px;font-weight:700;color:var(--ink2);padding:2px 4px}
+
+/* ledger */
+.mv-up{color:var(--mint)!important} .mv-down{color:var(--danger)!important}
+.acct .num small.mv-up,.acct .num small.mv-down{font-weight:700}
+.ledger{background:var(--bg);border-radius:14px;padding:10px 12px;display:grid;gap:6px;font-size:13px}
+.lg-h{font-size:12px;color:var(--ink2);font-weight:700}
+.lg-row{display:flex;justify-content:space-between;gap:8px}
+.lg-row .num{font-weight:600;white-space:nowrap}
+
 /* lock */
 #lock{position:fixed;inset:0;z-index:100;background:linear-gradient(170deg,var(--pink-soft),var(--bg) 60%);display:grid;place-items:center;padding:24px 16px}
 .lock-in{width:100%;max-width:340px;display:grid;gap:12px;text-align:center}
@@ -489,7 +507,7 @@ const monthlyOf = (f, ym = S.month) => {
 const WD = ['日','月','火','水','木','金','土'];
 const PIG_LINES = ['ぶひっ！','きょうもえらい！','ちょきん だいすき','つばさ、ファイト！','りさこ、いつもありがと','むだづかい はんたーい','ごはん なににする？','おなか いっぱい ¥'];
 const JOBDEF = {wage:0, ot:1.25, goal:0, day:0, allow:0, use:'worked'};
-const DEF = {names:{a:'つばさ', b:'りさこ'}, income:{a:0, b:0}, payday:{a:25, b:25}, goal:{a:0, b:0}, kids:{k1:'みづき', k2:'かなみ'}, job:{a:{...JOBDEF}, b:{...JOBDEF}}, saving:0, carry:false, area:''};
+const DEF = {names:{a:'つばさ', b:'りさこ'}, income:{a:0, b:0}, payday:{a:25, b:25}, goal:{a:0, b:0}, payacct:{a:'', b:''}, kids:{k1:'みづき', k2:'かなみ'}, job:{a:{...JOBDEF}, b:{...JOBDEF}}, saving:0, carry:false, area:''};
 
 const today = new Date();
 const pad2 = n => String(n).padStart(2,'0');
@@ -811,7 +829,7 @@ function rebuildSettings(){
     S.settings = {
       names: {...DEF.names, ...(d.names||{})},
       income: {...DEF.income, ...(d.income||{})},
-      payday: {...DEF.payday, ...(d.payday||{})}, goal: {...DEF.goal, ...(d.goal||{})}, kids: {...DEF.kids, ...(d.kids||{})}, job: {a: {...JOBDEF, ...((d.job||{}).a||{})}, b: {...JOBDEF, ...((d.job||{}).b||{})}}, area: typeof d.area === 'string' ? d.area : '',
+      payday: {...DEF.payday, ...(d.payday||{})}, goal: {...DEF.goal, ...(d.goal||{})}, payacct: {...DEF.payacct, ...(d.payacct||{})}, kids: {...DEF.kids, ...(d.kids||{})}, job: {a: {...JOBDEF, ...((d.job||{}).a||{})}, b: {...JOBDEF, ...((d.job||{}).b||{})}}, area: typeof d.area === 'string' ? d.area : '',
       saving: Number(d.saving)||0, carry: !!d.carry,
     };
     schedule();
@@ -868,6 +886,32 @@ function spentOf(ym){
   const isCard = t => S.cards.some(c => c.id === t.pay);
   return {cash: sum(list.filter(t => !isCard(t)), t => t.amount), card: sum(list.filter(isCard), t => t.amount), all: sum(list, t => t.amount), list};
 }
+/* 口座の残高＝最後に入れた残高 ＋ そのあとに動いたお金（給料の入金・カードと固定費の引き落とし） */
+function dayTs(ym, day){ const [y, m] = ym.split('-').map(Number); return new Date(y, m - 1, Math.min(Number(day) || 1, daysIn(ym))).getTime(); }
+function payDateOf(p){
+  if (p.date) return p.date;
+  const d = Number(S.settings.payday[p.who]);
+  return `${p.month}-${pad2(Math.min(d || 1, daysIn(p.month)))}`;
+}
+function balanceOf(a){
+  const baseT = Number(a.updatedAt || a.at) || 0, now = Date.now();
+  let v = Number(a.balance) || 0;
+  const ev = [];
+  const hit = (t, amt, label) => { if (t > baseT && t <= now && amt) { v += amt; ev.push({t, amt, label}); } };
+  S.pays.filter(p => p.account === a.id).forEach(p => {
+    const [y, m, d] = payDateOf(p).split('-').map(Number);
+    hit(new Date(y, m - 1, d).getTime(), Number(p.amount) || 0, `💰 ${name(p.who)}の給料（${mShort(p.month)}）`);
+  });
+  const startYM = (() => { const d = new Date(baseT || now); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`; })();
+  for (let ym = startYM; ym <= curYM; ym = addMonth(ym, 1)) {
+    S.cards.filter(c => c.account === a.id && c.day).forEach(c => hit(dayTs(ym, c.day), -billOf(ym, c).v, `💳 ${c.name}（${mShort(ym)}）`));
+    S.fixed.filter(f => f.account === a.id && f.day && f.freq !== 'year').forEach(f => hit(dayTs(ym, f.day), -monthlyOf(f, ym), `${fixedEmoji(f)} ${f.name}（${mShort(ym)}）`));
+  }
+  ev.sort((x, y) => x.t - y.t);
+  return {v, ev, baseT, base: Number(a.balance) || 0};
+}
+const totalAssets = () => sum(S.accounts, a => balanceOf(a).v);
+
 /* これからの引き落とし（今日以降〜来月分）を口座ごとに */
 function upcomingByAccount(){
   const out = {};
@@ -877,6 +921,10 @@ function upcomingByAccount(){
     const key = c.account && S.accounts.some(a => a.id === c.account) ? c.account : '_none';
     const pendingThis = c.day && today.getDate() < Number(c.day) ? billOf(curYM, c).v : 0;
     out[key] = (out[key]||0) + pendingThis + billOf(nx, c).v;
+  });
+  S.fixed.filter(f => f.account && f.day && f.freq !== 'year' && S.accounts.some(a => a.id === f.account)).forEach(f => {
+    const pendingThis = today.getDate() < Number(f.day) ? monthlyOf(f, curYM) : 0;
+    out[f.account] = (out[f.account]||0) + pendingThis + monthlyOf(f, nx);
   });
   return out;
 }
@@ -1017,7 +1065,7 @@ function snapshot(){
   const carry = S.settings.carry ? remain : 0;
   const left = daysLeft(M);
   const up = upcomingByAccount();
-  const assets = sum(S.accounts, a => a.balance);
+  const assets = totalAssets();
   const cats = CATS.map(k => ({k, v: sum(sp.list.filter(t => t.cat === k.id), t => t.amount), p: sum(spP.list.filter(t => t.cat === k.id), t => t.amount)}));
   return {M, N, P, pm, pn, sp, spP, remain, nextLeft: pn.base + carry, left, perDay: left > 0 && remain > 0 ? Math.floor(remain / left) : 0,
     assets, assetsAfter: up ? assets - sum(Object.values(up)) : null, cats};
@@ -1025,7 +1073,8 @@ function snapshot(){
 function pigComments(){
   const x = snapshot(), out = [];
   const add = (mood, text) => out.push({mood, text});
-  if (!(x.pm.income > 0)) return [{mood:'happy', text:'はじめまして！手取りを入れてくれたら、いろいろ教えるね'}];
+  if (x.M === curYM) salaryDue().forEach(w => add('happy', `${name(w)}の給料日が来たよ！給料を入力してね💰`));
+  if (!(x.pm.income > 0) && !out.length) return [{mood:'happy', text:'はじめまして！手取りを入れてくれたら、いろいろ教えるね'}];
   const est = x.pn.cards.some(c => !c.ok);
   // 来月のよゆう（いちばん大事なので先頭）
   if (x.nextLeft > 0) add(x.nextLeft > x.pn.income * .2 ? 'happy' : 'normal', `${mShort(x.N)}はカードを払っても ${yen(x.nextLeft)} よゆうがあるよ〜${est ? '（見込み）' : ''}`);
@@ -1153,7 +1202,7 @@ function todoItems(){
     {k:'me', done: !!me, t:'このスマホを使う人をえらぶ', s:'入力した人が自動でつきます'},
     {k:'card', done: !!me && S.cards.some(c => c.owner === me || c.owner === 'both'), t: `${me ? name(me) : 'じぶん'}のカードを登録`, s:'ふだん使うクレジットカード'},
     {k:'bank', done: S.accounts.length > 0, t:'銀行口座を登録', s:'残高を入れると総資産が出ます'},
-    {k:'income', done: !!me && Number(S.settings.income[me]) > 0, t:'いつもの手取りと給料日', s:'来月の見通しに使います'},
+    {k:'income', done: !!me && Number(S.settings.income[me]) > 0, t:'給料日といつもの手取り（目安）', s:'給料日にお知らせが出ます'},
     {k:'fixed', done: S.fixed.length > 0, t:'固定費を入れる', s:'電気代・ケータイ代・保険料など'},
   ];
 }
@@ -1198,15 +1247,20 @@ function render(){
   if (lastTab !== S.tab) { v.style.animation = 'none'; void v.offsetWidth; v.style.animation = ''; lastTab = S.tab; }
 }
 
+function paydayOf(w){ const d = Number(S.settings.payday[w]); return d ? Math.min(d, daysIn(curYM)) : 0; }
+function salaryDue(){ return ['a','b'].filter(w => paydayOf(w) && today.getDate() >= paydayOf(w) && !S.pays.some(p => p.month === curYM && p.who === w)); }
+function salarySoon(){ return ['a','b'].filter(w => paydayOf(w) && paydayOf(w) > today.getDate() && paydayOf(w) - today.getDate() <= 3); }
 function vPayday(){
   if (S.month !== curYM) return '';
-  const due = ['a','b'].filter(w => {
-    const d = Number(S.settings.payday[w]);
-    return d && today.getDate() >= Math.min(d, daysIn(curYM)) && !S.pays.some(p => p.month === curYM && p.who === w);
-  });
-  if (!due.length) return '';
-  return `<section><button type="button" class="payday" data-act="salary"><span class="big">💰</span>
-    <span>${due.map(name).map(esc).join('と')}の給料日だよ！<small>${mShort(curYM)}の手取りを入れよう</small></span></button></section>`;
+  const due = salaryDue(), soon = salarySoon();
+  if (!due.length && !soon.length) return '';
+  const mine = w => w === S.me ? 'mine' : '';
+  return `<section class="payday-card">
+    ${due.length ? `<div class="pd-head">${pigBtn('happy')}<div><b>給料日が来たよ！</b><span>今月の給料を入力してね💰</span></div></div>
+    ${due.map(w => `<button type="button" class="payday ${mine(w)}" data-act="salary" data-v="${w}"><span class="big">💰</span>
+      <span>${esc(name(w))}の給料を入力する<small>${mShort(curYM)}${paydayOf(w)}日が給料日・入れるまでは目安 ${yen(S.settings.income[w])} で計算中</small></span><span class="go">›</span></button>`).join('')}` : ''}
+    ${soon.map(w => `<div class="pd-soon">🗓 もうすぐ${esc(name(w))}の給料日（${Number(curYM.slice(5))}/${paydayOf(w)}・あと${paydayOf(w) - today.getDate()}日）</div>`).join('')}
+  </section>`;
 }
 
 function vHome(){
@@ -1356,7 +1410,7 @@ function vBillTodo(){
 }
 function vAssetsMini(){
   if (!S.accounts.length) return '';
-  const total = sum(S.accounts, a => a.balance);
+  const total = totalAssets();
   const up = upcomingByAccount();
   const upTotal = up ? sum(Object.values(up)) : 0;
   return `<section class="card"><h2>家族の総資産 <button type="button" class="link" data-act="tab" data-v="wallet">口座を見る</button></h2>
@@ -1404,19 +1458,19 @@ function vList(){
 
 function vWallet(){
   const M = S.month, P = addMonth(M, -1);
-  const total = sum(S.accounts, a => a.balance);
+  const total = totalAssets();
   const up = upcomingByAccount();
-  const acctRows = S.accounts.map(a => `<button type="button" class="acct" data-act="editacct" data-id="${esc(a.id)}">
+  const acctRows = S.accounts.map(a => { const b = balanceOf(a); const moved = b.v - b.base; return `<button type="button" class="acct" data-act="editacct" data-id="${esc(a.id)}">
       <span class="ic" style="background:${whoSoft(a.owner)}">🏦</span>
-      <span><span class="nm">${esc(a.name)}</span><small><i class="dot" style="background:${whoColor(a.owner)}"></i>${esc(name(a.owner))}${a.updatedAt ? `・${whenStr(a.updatedAt)} ${esc(name(a.who))}が更新` : ''}</small></span>
-      <span class="num">${yen(a.balance)}${up && up[a.id] ? `<small>引落予定 −${yen(up[a.id])}</small>` : ''}</span></button>`).join('');
+      <span><span class="nm">${esc(a.name)}</span><small><i class="dot" style="background:${whoColor(a.owner)}"></i>${esc(name(a.owner))}${a.updatedAt ? `・${whenStr(a.updatedAt)}${a.who === 'a' || a.who === 'b' ? ` ${esc(name(a.who))}が` : 'に'}残高を入力` : ''}</small></span>
+      <span class="num">${yen(b.v)}${b.ev.length ? `<small class="${moved >= 0 ? 'mv-up' : 'mv-down'}">${whenStr(b.baseT)}から ${moved >= 0 ? '+' : '−'}${yen(Math.abs(moved)).replace('−','')}</small>` : ''}${up && up[a.id] ? `<small>引落予定 −${yen(up[a.id])}</small>` : ''}</span></button>`; }).join('');
   const assets = `<section class="card"><h2>家族の総資産</h2>
     <div class="asset-top"><span class="num big">${yen(total)}</span></div>
     ${up && S.cards.length ? `<div class="asset-after"><span>カード引き落とし（来月分まで）のあと</span><b class="num">${yen(total - sum(Object.values(up)))}</b></div>` : ''}
     <div class="accts">${acctRows || '<div class="note" style="margin:0">銀行口座を登録して残高を入れると、家族の総資産がわかります。</div>'}</div>
     ${up && up._none ? `<div class="note">口座が決まっていないカードの引き落とし予定 −${yen(up._none)}（カードの編集で口座をえらべます）</div>` : ''}
     <div style="margin-top:12px"><button type="button" class="btn ghost" data-act="newacct">＋ 口座を追加</button></div>
-    <div class="note">残高は口座をタップして入れ直してね（アプリや通帳を見ながら）。</div>
+    <div class="note">給料の入金、カードと固定費の引き落とし（口座と日にちを決めたもの）で、残高は自動で動きます。実際の残高とずれたら、口座をタップして今の残高を入れ直してね。そこから計算し直します。</div>
   </section>`;
 
   const plan = monthPlan(M);
@@ -1456,7 +1510,7 @@ function vSettings(){
   const tpls = FIXED_TEMPLATES.filter(t => !have.has(t.n));
   const person = w => `<div class="person" style="background:${whoSoft(w)}"><b><i class="dot" style="background:${whoColor(w)}"></i>${esc(name(w))}</b>
     <div class="grid2">
-      <div class="field"><span class="lb">いつもの手取り</span>${numBtn('set:income.' + w, 'yen', `${name(w)}のいつもの手取り`, st.income[w], '¥0')}</div>
+      <div class="field"><span class="lb">いつもの手取り（目安）</span>${numBtn('set:income.' + w, 'yen', `${name(w)}のいつもの手取り`, st.income[w], '¥0')}</div>
       <div class="field"><span class="lb">給料日</span>${numBtn('set:payday.' + w, 'day', `${name(w)}の給料日`, st.payday[w], '未設定')}</div>
     </div>
     <div class="field"><span class="lb">月に使うお金の目標</span>${numBtn('set:goal.' + w, 'yen', `${name(w)}の月の目標`, st.goal[w], '例: ¥30,000')}</div></div>`;
@@ -1466,7 +1520,7 @@ function vSettings(){
   </section>
   <section class="card stack"><h2 style="margin:0">給料</h2>
     ${person('a')}${person('b')}
-    <div class="note" style="margin:0">給料日になるとホームにお知らせが出ます。実際の金額はその月ごとに入れられて、未入力の月は「いつもの手取り」で計算します。</div>
+    <div class="note" style="margin:0">給料は毎月ちがうので、給料日にホームに出る「給料を入力してね」から、その月の手取りを入れてね。入れるまでは「いつもの手取り（目安）」で計算します。</div>
   </section>
   <section class="card stack"><h2 style="margin:0">貯金とくりこし</h2>
     <div class="field"><span class="lb">毎月の貯金目標</span>${numBtn('set:saving', 'yen', '毎月の貯金目標', st.saving, '¥0')}</div>
@@ -1475,7 +1529,7 @@ function vSettings(){
   </section>
   <section class="card" id="fixed-sec"><h2>固定費 <span><span class="num" style="color:var(--ink)">${yen(fixedTotal)}</span><span style="font-weight:500"> / 月</span></span></h2>
     ${S.fixed.map(f => `<button type="button" class="fixed-row" data-act="editfixed" data-id="${esc(f.id)}">
-      <span><span class="fx-e">${esc(fixedEmoji(f))}</span>${esc(f.name)}${f.freq === 'year' ? '<span class="tag est">年払い</span>' : f.freq === 'vary' ? '<span class="tag est">毎月かわる</span>' : ''}${f.kid ? `<span class="tag ok">👧${esc(kidName(f.kid))}</span>` : ''}${f.day ? `<small>${esc(f.day)}日</small>` : ''}</span>
+      <span><span class="fx-e">${esc(fixedEmoji(f))}</span>${esc(f.name)}${f.freq === 'year' ? '<span class="tag est">年払い</span>' : f.freq === 'vary' ? '<span class="tag est">毎月かわる</span>' : ''}${f.kid ? `<span class="tag ok">👧${esc(kidName(f.kid))}</span>` : ''}${f.account && S.accounts.some(a => a.id === f.account) ? `<span class="tag ok">🏦${esc(S.accounts.find(a => a.id === f.account).name)}</span>` : ''}${f.day ? `<small>${esc(f.day)}日</small>` : ''}</span>
       <span class="num">${yen(monthlyOf(f))}${f.freq === 'year' ? `<small class="fx-y">年 ${yen(f.amount)}</small>` : f.freq === 'vary' ? `<small class="fx-y">${fixmOf(f, S.month) ? `${mShort(S.month)}の金額` : '目安'}</small>` : ''}</span></button>`).join('')
       || '<p class="note" style="margin-top:0">毎月決まって出ていくお金を入れてね。下の項目をタップすると、すぐ金額を入れられるよ。</p>'}
     ${tpls.length ? `<div class="fx-add-t">タップして追加</div>
@@ -1621,18 +1675,22 @@ function setSheetNum(key, kind, v){
   if (b) { b.querySelector('.v').textContent = kind === 'day' ? (v ? `毎月${v}日` : '未設定') : yen(v); b.classList.toggle('zero', !v); b.classList.remove('pop'); void b.offsetWidth; b.classList.add('pop'); }
 }
 
-function salarySheet(){
-  const M = S.month;
-  const cur = w => { const p = S.pays.find(p => p.month === M && p.who === w); return p ? p.amount : 0; };
+function salarySheet(focus){
+  const M = focus ? curYM : S.month;
+  const doc = w => S.pays.find(p => p.month === M && p.who === w);
+  const cur = w => { const p = doc(w); return p ? p.amount : 0; };
+  const acc = w => { const p = doc(w); const id = p && p.account !== undefined ? p.account : S.settings.payacct[w]; return S.accounts.some(a => a.id === id) ? id : ''; };
+  const accChips = w => S.accounts.length ? `<div class="field"><span class="lb">振込先の口座</span><div class="chips">${[['', 'えらばない'], ...S.accounts.map(a => [a.id, a.name])].map(([v, l]) => `<button type="button" class="chip ${acc(w) === v ? 'on' : ''}" data-pick="acct_${w}" data-v="${esc(v)}">${esc(l)}</button>`).join('')}</div></div>` : '';
   openSheet(`
     <h3>💰 ${mLabel(M)}の給料</h3>
     <div class="stack">
       ${['a','b'].map(w => `<div class="person" style="background:${whoSoft(w)}"><b><i class="dot" style="background:${whoColor(w)}"></i>${esc(name(w))}の手取り</b>
         ${sheetNum('pay_' + w, 'yen', `${name(w)}の${mShort(M)}の手取り`, cur(w), false)}
-        <span style="font-size:12px;color:var(--ink2)">いつもの額 ${yen(S.settings.income[w])}</span></div>`).join('')}
+        <span style="font-size:12px;color:var(--ink2)">いつもの額 ${yen(S.settings.income[w])}</span>${accChips(w)}</div>`).join('')}
       <button type="button" class="btn" data-act="savesalary">入れる</button>
-      <p class="note" style="margin:0">入れた月は、この金額で使えるお金を計算します。</p>
-    </div>`, {kind:'salary', pay_a: cur('a'), pay_b: cur('b'), start_a: cur('a'), start_b: cur('b')});
+      <p class="note" style="margin:0">入れた月は、この金額で使えるお金を計算します。振込先をえらぶと、給料日にその口座の残高にたされます。</p>
+    </div>`, {kind:'salary', month: M, pay_a: cur('a'), pay_b: cur('b'), start_a: cur('a'), start_b: cur('b'), acct_a: acc('a'), acct_b: acc('b'), sacct_a: acc('a'), sacct_b: acc('b')});
+  if (focus) setTimeout(() => openPad({title: `${name(focus)}の${mShort(M)}の手取り`, kind: 'yen', value: '', hint: '給料明細の「差引支給額（手取り）」を入れてね', onDone: v => setSheetNum('pay_' + focus, 'yen', v)}), 250);
 }
 
 function cardSheet(c){
@@ -1655,16 +1713,20 @@ function cardSheet(c){
 function acctSheet(a){
   const isNew = !a;
   a = a || {name:'', owner: S.me || 'a', balance: 0};
+  const b = isNew ? {v: 0, ev: [], baseT: 0, base: 0} : balanceOf(a);
   openSheet(`
     <h3>${isNew ? '口座を登録' : '口座を編集'}</h3>
     <div class="stack">
       ${isNew ? `<div class="chips">${BANK_TEMPLATES.map(n => `<button type="button" class="chip" data-act="tplname" data-t="#a-name" data-v="${n}">${n}</button>`).join('')}</div>` : ''}
       <div class="field"><label for="a-name">口座の名前</label><input class="in" id="a-name" value="${esc(a.name)}" placeholder="ゆうちょ（生活費）など" maxlength="20" enterkeyhint="done"></div>
       <div class="field"><span class="lb">だれの口座</span><div class="chips">${[['a',name('a')],['b',name('b')],['both',name('both')]].map(([v,l]) => `<button type="button" class="chip ${a.owner===v?'on':''}" data-pick="owner" data-v="${v}">${esc(l)}</button>`).join('')}</div></div>
-      <div class="field"><span class="lb">いまの残高</span>${sheetNum('balance', 'yen', `${a.name || '口座'}の残高`, a.balance, true)}</div>
+      <div class="field"><span class="lb">いまの残高</span>${sheetNum('balance', 'yen', `${a.name || '口座'}の残高`, b.v, true)}</div>
+      ${b.ev.length ? `<div class="ledger"><div class="lg-h">${whenStr(b.baseT)}に入れた残高 <b class="num">${yen(b.base)}</b> から自動で動いたお金</div>
+        ${b.ev.map(e => `<div class="lg-row"><span>${whenStr(e.t)} ${esc(e.label)}</span><span class="num ${e.amt >= 0 ? 'mv-up' : 'mv-down'}">${e.amt >= 0 ? '+' : '−'}${yen(Math.abs(e.amt)).replace('−','')}</span></div>`).join('')}
+        <div class="lg-h">実際の残高とちがうときは、上の金額を今の残高に直して保存してね</div></div>` : ''}
       ${isNew ? '<button type="button" class="btn" data-act="saveacct">登録する</button>'
         : '<div class="btn-row"><button type="button" class="btn danger" data-act="delacct">削除</button><button type="button" class="btn" data-act="saveacct">保存する</button></div>'}
-    </div>`, {kind:'acct', id: a.id, owner: a.owner, balance: Number(a.balance)||0, startBalance: Number(a.balance)||0});
+    </div>`, {kind:'acct', id: a.id, owner: a.owner, balance: b.v, startBalance: b.v});
 }
 
 function fixedSheet(f){
@@ -1682,11 +1744,12 @@ function fixedSheet(f){
         <div class="field"><span class="lb">支払い日</span>${sheetNum('day', 'day', '支払い日', f.day, false)}</div>
       </div>
       <div class="field"><span class="lb">こどもの分（保育料・学資など）</span><div class="chips">${kidChips(f.kid || '')}</div></div>
+      ${S.accounts.length ? `<div class="field"><span class="lb">引き落とし口座（えらぶと支払い日に残高からひきます）</span><div class="chips">${[['', 'えらばない'], ...S.accounts.map(a => [a.id, a.name])].map(([v, l]) => `<button type="button" class="chip ${(f.account || '') === v ? 'on' : ''}" data-pick="account" data-v="${esc(v)}">${esc(l)}</button>`).join('')}</div></div>` : ''}
       <div class="hint" id="x-hint" ${fq === 'month' ? 'hidden' : ''}>${fq === 'vary' ? '月ごとの金額は、ホームの「今月の金額を入れよう」から入れてね。入れない月は目安で計算するよ' : `月割り ${yen(Math.round((Number(f.amount)||0)/12))} で計算するよ`}</div>
       ${!isNew && fq === 'vary' ? `<div class="field"><span class="lb">${mShort(S.month)}の金額</span>${numBtn(`fixm:${S.month}:${esc(f.id)}`, 'yen', `${f.name}・${mShort(S.month)}の金額`, fm ? fm.amount : '', 'タップして入力')}</div>` : ''}
       ${isNew ? '<button type="button" class="btn" data-act="savefixed">追加する</button>'
         : '<div class="btn-row"><button type="button" class="btn danger" data-act="delfixed">削除</button><button type="button" class="btn" data-act="savefixed">保存する</button></div>'}
-    </div>`, {kind:'fixed', id: f.id, amount: Number(f.amount)||0, day: Number(f.day)||0, freq: fq, emoji: f.emoji || '', kid: f.kid || ''});
+    </div>`, {kind:'fixed', id: f.id, amount: Number(f.amount)||0, day: Number(f.day)||0, freq: fq, emoji: f.emoji || '', kid: f.kid || '', account: f.account || ''});
 }
 
 /* two taps to delete, since the viewer has no confirm dialog */
@@ -1823,7 +1886,7 @@ document.addEventListener('click', e => {
   else if (a === 'tplname') { const i = sq(el.dataset.t); if (i) i.value = v; el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop'); }
   else if (a === 'newtx') { if (S.readonly) { toast('見るだけモードなので入力できません。上の赤いお知らせを見てね'); window.scrollTo({top: 0, behavior: 'smooth'}); return; } txSheet(); }
   else if (a === 'edittx') { const t = S.tx.find(t => t.id === el.dataset.id); if (t) txSheet(t); }
-  else if (a === 'salary') salarySheet();
+  else if (a === 'salary') salarySheet(v === 'a' || v === 'b' ? v : null);
   else if (a === 'newcard') cardSheet();
   else if (a === 'editcard') { const c = S.cards.find(c => c.id === el.dataset.id); if (c) cardSheet(c); }
   else if (a === 'newacct') acctSheet();
@@ -1856,16 +1919,23 @@ document.addEventListener('click', e => {
   }
   else if (a === 'deltx') { if (!armed(el)) return; const id = sheetCtx.id; write(() => db.collection('tx').doc(id).delete()); closeSheet(); toast('削除しました'); }
   else if (a === 'savesalary') {
-    const M = S.month; let any = false;
+    const M = sheetCtx.month || S.month; let any = false; const msgs = [];
     ['a','b'].forEach(w => {
-      const val = Number(sheetCtx['pay_' + w]) || 0;
-      if (val === Number(sheetCtx['start_' + w])) return;
+      const val = Number(sheetCtx['pay_' + w]) || 0, account = sheetCtx['acct_' + w] || '';
+      if (val === Number(sheetCtx['start_' + w]) && account === sheetCtx['sacct_' + w]) return;
       const ref = db.collection('pay').doc(`${M}_${w}`);
-      if (val) { any = true; write(() => ref.set({month: M, who: w, amount: val, by: S.me || w, at: Date.now()})); }
-      else write(() => ref.delete());
+      if (val) {
+        any = true;
+        const old = S.pays.find(p => p.month === M && p.who === w);
+        const body = {month: M, who: w, amount: val, account, date: old && old.date ? old.date : payDateOf({month: M, who: w}), by: S.me || w, at: Date.now()};
+        write(() => ref.set(body));
+        const ac = S.accounts.find(x => x.id === account);
+        if (ac) msgs.push(`${ac.name}に +${yen(val)}`);
+      } else write(() => ref.delete());
+      if (account !== (S.settings.payacct[w] || '')) { S.settings.payacct[w] = account; saveSetting(`payacct.${w}`); }
     });
     closeSheet();
-    if (any) { coinRain(); toast('給料日おめでとう！おつかれさま'); } else toast('保存しました');
+    if (any) { coinRain(); toast(msgs.length ? `給料日おめでとう！${msgs.join('・')}` : '給料日おめでとう！おつかれさま'); } else toast('保存しました');
   }
   else if (a === 'savecard') {
     const nm = sq('#c-name').value.trim().slice(0,20);
@@ -1882,7 +1952,7 @@ document.addEventListener('click', e => {
     const prev = sheetCtx.id ? S.accounts.find(x => x.id === sheetCtx.id) : null;
     const bal = Number(sheetCtx.balance) || 0;
     const changed = !prev || bal !== sheetCtx.startBalance;
-    const body = {name: nm, owner: sheetCtx.owner, balance: bal, who: changed ? (S.me || 'a') : (prev.who || ''), updatedAt: changed ? Date.now() : (prev.updatedAt || 0), at: prev ? prev.at : Date.now()};
+    const body = {name: nm, owner: sheetCtx.owner, balance: changed ? bal : (Number(prev.balance) || 0), who: changed ? (S.me || 'a') : (prev.who || ''), updatedAt: changed ? Date.now() : (prev.updatedAt || 0), at: prev ? prev.at : Date.now()};
     const ref = sheetCtx.id ? db.collection('accounts').doc(sheetCtx.id) : db.collection('accounts').doc();
     write(() => ref.set(body)); burst(['🏦','🪙','✨']); closeSheet(); toast(prev ? '保存しました' : `${nm}を登録したよ`);
   }
@@ -1892,7 +1962,7 @@ document.addEventListener('click', e => {
     const amount = Number(sheetCtx.amount) || 0;
     if (!nm || (!amount && sheetCtx.freq !== 'vary')) { toast('なまえと金額を入れてね'); return; }
     const prev = sheetCtx.id ? S.fixed.find(f => f.id === sheetCtx.id) : null;
-    const body = {name: nm, amount, freq: ['year','vary'].includes(sheetCtx.freq) ? sheetCtx.freq : 'month', day: Number(sheetCtx.day) || '', emoji: sheetCtx.emoji || FIXED_EMOJI[nm] || '', kid: sheetCtx.kid || '', at: prev ? prev.at : Date.now()};
+    const body = {name: nm, amount, freq: ['year','vary'].includes(sheetCtx.freq) ? sheetCtx.freq : 'month', day: Number(sheetCtx.day) || '', emoji: sheetCtx.emoji || FIXED_EMOJI[nm] || '', kid: sheetCtx.kid || '', account: sheetCtx.account || '', at: prev ? prev.at : Date.now()};
     const ref = sheetCtx.id ? db.collection('fixed').doc(sheetCtx.id) : db.collection('fixed').doc();
     write(() => ref.set(body)); burst([body.emoji || '📌','✨','🪙']); closeSheet(); toast(prev ? '保存しました' : '固定費を追加しました');
   }
