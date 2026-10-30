@@ -75,6 +75,7 @@ section{margin-block:14px}
 .card{background:var(--surface);border-radius:var(--r);padding:18px;box-shadow:var(--shadow)}
 h2{font-size:14px;font-weight:700;color:var(--ink2);margin:0 0 10px;letter-spacing:.04em;display:flex;align-items:center;justify-content:space-between;gap:8px}
 h2 .link{border:0;background:none;color:var(--pink);font-weight:700;font-size:13px;padding:4px 0}
+.pad-h .link{border:0;background:#EEF6FD;color:#3A7CC0;font-weight:700;font-size:13px;padding:6px 14px;border-radius:999px}
 .note{font-size:12px;color:var(--ink2);margin-top:10px;line-height:1.55}
 .tag{display:inline-block;font-size:10.5px;font-weight:700;border-radius:999px;padding:1px 7px;margin-left:6px;vertical-align:1px;line-height:1.5}
 .tag.est{background:var(--butter-soft);color:var(--ink)}
@@ -516,7 +517,7 @@ const curYM = todayStr.slice(0,7);
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const S = {
-  settings: clone(DEF), works: [], fixm: [], workWho: lsGet('futari-workwho') === 'a' ? 'a' : 'b', fixed: [], cards: [], tx: [], bills: [], pays: [], accounts: [],
+  settings: clone(DEF), works: [], fixm: [], workWho: lsGet('futari-workwho') === 'a' ? 'a' : 'b', fixed: [], cards: [], tx: [], wds: [], bills: [], pays: [], accounts: [],
   month: curYM, txMonths: [], tab: 'home', whoFilter: 'all',
   me: lsGet('futari-me'), local: false, readonly: false, sayIdx: 0,
 };
@@ -842,6 +843,7 @@ function startSubs(){
   db.collection('accounts').onSnapshot(q => { S.accounts = rows(q).sort(byAt); schedule(); }, onErr);
   db.collection('bills').onSnapshot(q => { S.bills = rows(q); schedule(); }, onErr);
   db.collection('pay').onSnapshot(q => { S.pays = rows(q); schedule(); }, onErr);
+  db.collection('wd').onSnapshot(q => { S.wds = rows(q); schedule(); }, onErr);
   db.collection('work').onSnapshot(q => { S.works = rows(q); schedule(); }, onErr);
   subTx();
   if (db.pull) {
@@ -906,6 +908,10 @@ function balanceOf(a){
   S.pays.filter(p => p.account === a.id).forEach(p => {
     const [y, m, d] = payDateOf(p).split('-').map(Number);
     hit(new Date(y, m - 1, d).getTime(), Number(p.amount) || 0, `💰 ${name(p.who)}の給料（${mShort(p.month)}）`);
+  });
+  S.wds.filter(x => x.account === a.id).forEach(x => {
+    const [y, m, d] = String(x.date).split('-').map(Number);
+    hit(new Date(y, m - 1, d, 12).getTime(), -(Number(x.amount) || 0), `🏧 ${name(x.who)}が引き出し${x.memo ? '（' + x.memo + '）' : ''}`);
   });
   const startYM = (() => { const d = new Date(baseT || now); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`; })();
   for (let ym = startYM; ym <= curYM; ym = addMonth(ym, 1)) {
@@ -1423,6 +1429,14 @@ function txRow(t, showDate){
     <span class="num">${yen(t.amount)}</span></button>`;
 }
 
+function wdRow(x){
+  const ac = S.accounts.find(a => a.id === x.account);
+  return `<button type="button" class="row" data-act="editwd" data-id="${esc(x.id)}">
+    <div class="cico" style="background:#E3F0FB">🏧</div>
+    <div class="row-main"><div class="row-t">${esc(x.memo || '銀行引き出し')}</div>
+      <div class="row-s"><i class="dot" style="background:${whoColor(x.who)}"></i>${esc(name(x.who))}・${esc(ac ? ac.name : '口座なし')}から</div></div>
+    <span class="num" style="color:var(--ink2)">${yen(x.amount)}</span></button>`;
+}
 function vList(){
   const f = S.whoFilter;
   const list = spentOf(S.month).list.filter(t => f === 'all' || t.who === f);
@@ -1430,15 +1444,18 @@ function vList(){
     ${[['all','ぜんぶ'],['a',name('a')],['b',name('b')]].map(([v,l]) => `<button type="button" class="chip ${f===v?'on':''}" data-act="whof" data-v="${v}">${esc(l)}</button>`).join('')}
   </div>`;
   const total = `<section class="card total-card"><div><div style="font-size:13px;color:var(--ink2);font-weight:700">${mShort(S.month)}に使ったお金</div><div class="num">${yen(sum(list, t => t.amount))}</div></div><div style="font-size:13px;color:var(--ink2)">${list.length}件</div></section>`;
-  if (!list.length) return chips + total + emptyList();
+  const wds = S.wds.filter(x => x.month === S.month && (f === 'all' || x.who === f)).sort((x, y) => (y.at||0) - (x.at||0));
+  const wdTotal = wds.length ? `<div class="note" style="margin:-4px 4px 10px">🏧 銀行から引き出したお金 <b class="num">${yen(sum(wds, x => x.amount))}</b>（${wds.length}回）・使ったお金には入りません</div>` : '';
+  if (!list.length && !wds.length) return chips + total + emptyList();
   const groups = {};
-  list.forEach(t => (groups[t.date] = groups[t.date] || []).push(t));
+  list.forEach(t => (groups[t.date] = groups[t.date] || {t: [], w: []}).t.push(t));
+  wds.forEach(x => (groups[x.date] = groups[x.date] || {t: [], w: []}).w.push(x));
   const body = Object.keys(groups).sort().reverse().map(d => {
-    const dt = new Date(d + 'T00:00:00');
-    return `<div class="day"><span>${dt.getMonth()+1}月${dt.getDate()}日（${WD[dt.getDay()]}）${d === todayStr ? '・きょう' : ''}</span><span class="num">${yen(sum(groups[d], t => t.amount))}</span></div>
-      <div class="list">${groups[d].map(t => txRow(t, false)).join('')}</div>`;
+    const dt = new Date(d + 'T00:00:00'), g = groups[d];
+    return `<div class="day"><span>${dt.getMonth()+1}月${dt.getDate()}日（${WD[dt.getDay()]}）${d === todayStr ? '・きょう' : ''}</span><span class="num">${g.t.length ? yen(sum(g.t, t => t.amount)) : ''}</span></div>
+      <div class="list">${g.w.map(wdRow).join('')}${g.t.map(t => txRow(t, false)).join('')}</div>`;
   }).join('');
-  return chips + total + body;
+  return chips + total + wdTotal + body;
 }
 
 function vWallet(){
@@ -1550,6 +1567,7 @@ function openPad(o){
       <div class="pad-t">${esc(o.title)}</div>
       <div class="pad-v num" id="padv"></div>
       ${o.hint ? `<div class="pad-h">${esc(o.hint)}</div>` : ''}
+      ${o.sw ? `<div class="pad-h"><button type="button" class="link" data-act="${o.sw[0]}">${esc(o.sw[1])}</button></div>` : ''}
       <div class="keys">${keys.map(k => k === '' ? '<span></span>' : `<button type="button" class="key ${k==='del'?'kdel':''}" data-key="${k}" aria-label="${k==='del'?'1文字消す':k}">${k==='del'?'⌫':k}</button>`).join('')}</div>
       <div class="pad-btns"><button type="button" class="btn ghost" data-act="padclear">クリア</button><button type="button" class="btn" data-act="padok">OK</button></div>
     </div>`;
@@ -1635,6 +1653,7 @@ function txSheet(t){
   openSheet(`
     <h3>${isNew ? 'きろくする' : 'きろくを直す'}</h3>
     <div class="stack">
+      ${isNew ? `<div class="seg"><button type="button" class="on">💸 使ったお金</button><button type="button" data-act="newwd">🏧 銀行引き出し</button></div>` : ''}
       ${sheetNum('amount', 'yen', 'いくら使った？', t.amount, true)}
       <div class="catgrid">${CATS.map(k => `<button type="button" class="catbtn ${t.cat===k.id?'on':''}" data-pick="cat" data-v="${k.id}"><b>${k.e}</b>${k.n}</button>`).join('')}</div>
       <div class="field"><span class="lb">だれが</span><div class="seg"><button type="button" data-pick="who" data-v="a" class="${t.who==='a'?'on':''}">${esc(name('a'))}</button><button type="button" data-pick="who" data-v="b" class="${t.who==='b'?'on':''}">${esc(name('b'))}</button></div></div>
@@ -1649,7 +1668,30 @@ function txSheet(t){
         : '<div class="btn-row"><button type="button" class="btn danger" data-act="deltx">削除</button><button type="button" class="btn" data-act="savetx">保存する</button></div>'}
     </div>`, {kind:'tx', id: t.id, amount: t.amount, cat: t.cat, who: t.who, pay: t.pay, kid: t.kid || ''});
   payHint();
-  if (isNew) setTimeout(() => openPad({title:'いくら使った？', kind:'yen', value:'', onDone: v => setSheetNum('amount', 'yen', v)}), 200);
+  if (isNew) setTimeout(() => openPad({title:'いくら使った？', kind:'yen', value:'', sw: ['newwd', '🏧 銀行引き出しはこちら ›'], onDone: v => setSheetNum('amount', 'yen', v)}), 200);
+}
+function wdSheet(x){
+  const isNew = !x;
+  const who = x ? x.who : (S.me || 'a');
+  const lastAcc = (S.wds.filter(w => w.who === who).sort((p, q) => (q.at||0) - (p.at||0))[0] || {}).account;
+  const own = S.accounts.find(a => a.owner === who) || S.accounts[0];
+  x = x || {amount: 0, who, account: S.accounts.some(a => a.id === lastAcc) ? lastAcc : (own ? own.id : ''), date: S.month === curYM ? todayStr : S.month + '-01', memo: ''};
+  openSheet(`
+    <h3>${isNew ? 'きろくする' : '引き出しを直す'}</h3>
+    <div class="stack">
+      ${isNew ? `<div class="seg"><button type="button" data-act="newtx">💸 使ったお金</button><button type="button" class="on">🏧 銀行引き出し</button></div>` : ''}
+      ${sheetNum('amount', 'yen', 'いくら引き出した？', x.amount, true)}
+      <div class="field"><span class="lb">どの口座から</span><div class="chips">${S.accounts.length ? S.accounts.map(a => `<button type="button" class="chip ${x.account === a.id ? 'on' : ''}" data-pick="account" data-v="${esc(a.id)}">🏦 ${esc(a.name)}</button>`).join('') : '<span class="note" style="margin:0">おさいふタブで口座を登録すると、残高から自動で引かれます</span>'}</div></div>
+      <div class="field"><span class="lb">だれが</span><div class="seg"><button type="button" data-pick="who" data-v="a" class="${x.who==='a'?'on':''}">${esc(name('a'))}</button><button type="button" data-pick="who" data-v="b" class="${x.who==='b'?'on':''}">${esc(name('b'))}</button></div></div>
+      <div class="grid2">
+        <div class="field"><label for="w-date">日付</label><input class="in" type="date" id="w-date" value="${esc(x.date)}"></div>
+        <div class="field"><label for="w-memo">メモ</label><input class="in" id="w-memo" value="${esc(x.memo || '')}" placeholder="生活費 など" maxlength="30" enterkeyhint="done"></div>
+      </div>
+      ${isNew ? '<button type="button" class="btn" data-act="savewd">きろくする</button>'
+        : '<div class="btn-row"><button type="button" class="btn danger" data-act="delwd">削除</button><button type="button" class="btn" data-act="savewd">保存する</button></div>'}
+      <p class="note" style="margin:0">引き出したお金は「使ったお金」には入りません。口座の残高から引かれて、現金で使ったときに「使ったお金」でつけてね。</p>
+    </div>`, {kind: 'wd', id: x.id, amount: x.amount, who: x.who, account: x.account || ''});
+  if (isNew) setTimeout(() => openPad({title: 'いくら引き出した？', kind: 'yen', value: '', sw: ['newtx', '💸 使ったお金はこちら ›'], onDone: v => setSheetNum('amount', 'yen', v)}), 200);
 }
 function setSheetNum(key, kind, v){
   if (!sheetCtx) return;
@@ -1868,7 +1910,9 @@ document.addEventListener('click', e => {
     openPad({title: el.dataset.title, kind: el.dataset.kind, value: el.dataset.v, onDone: val => padTarget(target, val)});
   }
   else if (a === 'tplname') { const i = sq(el.dataset.t); if (i) i.value = v; el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop'); }
-  else if (a === 'newtx') { if (S.readonly) { toast('見るだけモードなので入力できません。上の赤いお知らせを見てね'); window.scrollTo({top: 0, behavior: 'smooth'}); return; } txSheet(); }
+  else if (a === 'newtx') { if (S.readonly) { toast('見るだけモードなので入力できません。上の赤いお知らせを見てね'); window.scrollTo({top: 0, behavior: 'smooth'}); return; } if (pad) closePad(); txSheet(); }
+  else if (a === 'newwd') { if (S.readonly) { toast('見るだけモードなので入力できません'); return; } if (pad) closePad(); wdSheet(); }
+  else if (a === 'editwd') { const x = S.wds.find(x => x.id === el.dataset.id); if (x) wdSheet(x); }
   else if (a === 'edittx') { const t = S.tx.find(t => t.id === el.dataset.id); if (t) txSheet(t); }
   else if (a === 'salary') salarySheet(v === 'a' || v === 'b' ? v : null, el.dataset.m || null);
   else if (a === 'newcard') cardSheet();
@@ -1901,6 +1945,20 @@ document.addEventListener('click', e => {
     closeSheet();
     toast(body.month !== S.month ? `${mLabel(body.month)}にきろくしたよ` : edit ? '直したよ' : `${yen(amount)} きろくしたよ`);
   }
+  else if (a === 'savewd') {
+    const amount = Number(sheetCtx.amount) || 0;
+    if (!amount) { toast('金額を入れてね'); openPad({title: 'いくら引き出した？', kind: 'yen', value: '', onDone: v => setSheetNum('amount', 'yen', v)}); return; }
+    const date = sq('#w-date').value || todayStr;
+    const prev = sheetCtx.id ? S.wds.find(x => x.id === sheetCtx.id) : null;
+    const body = {date, month: date.slice(0,7), amount, who: sheetCtx.who || S.me || 'a', account: sheetCtx.account || '', memo: sq('#w-memo').value.trim().slice(0,30), at: prev ? prev.at : Date.now()};
+    const ref = sheetCtx.id ? db.collection('wd').doc(sheetCtx.id) : db.collection('wd').doc();
+    write(() => ref.set(body));
+    burst(['🏧', '💴', '✨'], 12);
+    closeSheet();
+    const ac = S.accounts.find(x => x.id === body.account);
+    toast(prev ? '直したよ' : `🏧 ${yen(amount)} 引き出し${ac ? `・${ac.name}から −${yen(amount)}` : ''}`);
+  }
+  else if (a === 'delwd') { if (!armed(el)) return; const id = sheetCtx.id; write(() => db.collection('wd').doc(id).delete()); closeSheet(); toast('削除しました'); }
   else if (a === 'deltx') { if (!armed(el)) return; const id = sheetCtx.id; write(() => db.collection('tx').doc(id).delete()); closeSheet(); toast('削除しました'); }
   else if (a === 'savesalary') {
     const M = sheetCtx.month || S.month; let any = false; const msgs = [];
