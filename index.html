@@ -864,7 +864,12 @@ document.addEventListener('focusout', () => setTimeout(() => { if (pending) { pe
    カードは翌月引き落とし。M月に口座から出るのは「M月の給料 − 固定費 − 貯金 − M月のカード引き落とし（=前月のカード利用）」と、M月の現金・QR払い。 */
 function incomeOf(ym, w){
   const p = S.pays.find(p => p.month === ym && p.who === w);
-  return p ? {v: Number(p.amount)||0, ok: true} : {v: Number(S.settings.income[w])||0, ok: false};
+  if (p) return {v: Number(p.amount)||0, ok: true, src: 'ok'};
+  const usual = Number(S.settings.income[w])||0;
+  if (usual) return {v: usual, ok: false, src: 'usual'};
+  // いつもの額が空なら、いちばん最近入れた給料を目安にする（りさこは毎月ちがうので）
+  const last = S.pays.filter(p => p.who === w && p.month < ym && Number(p.amount)).sort((x, y) => y.month.localeCompare(x.month))[0];
+  return last ? {v: Number(last.amount)||0, ok: false, src: 'last', from: last.month} : {v: 0, ok: false, src: 'none'};
 }
 function billOf(ym, card){
   const b = S.bills.find(b => b.month === ym && b.cardId === card.id);
@@ -1287,13 +1292,16 @@ function vHome(){
 
   const carry = S.settings.carry && hasPlan ? remain : 0;
   const nextLeft = pn.base + carry;
+  const incTag = i => i.src === 'ok' ? '<span class="tag ok">確定</span>' : i.src === 'usual' ? '<span class="tag est">いつもの額</span>' : i.src === 'last' ? `<span class="tag est">${mShort(i.from)}と同じ</span>` : '<span class="tag est">未入力</span>';
+  const incLines = (ym, pl) => [['a', pl.ia], ['b', pl.ib]].map(([w, i]) => `<div class="sub" role="button" tabindex="0" data-act="salary" data-v="${w}" data-m="${ym}" style="cursor:pointer"><span>${esc(name(w))}${incTag(i)}</span><span class="num">${i.src === 'none' ? '<u>入力する</u>' : yen(i.v)}</span></div>`).join('');
   const cardLines = pn.cards.map(x => `<div class="sub"><span>${esc(x.c.name)}${x.ok ? '<span class="tag ok">確定</span>' : '<span class="tag est">見込み</span>'}</span><span class="num">−${yen(x.v)}</span></div>`).join('');
   const next = hasPlan ? `
     <section class="card next">
       <div class="next-eyebrow">カードを払ったあと、${mShort(N)}に自由に使えるお金</div>
       <div class="next-big num ${nextLeft < 0 ? 'minus' : ''}">${yen(nextLeft)}</div>
       <div class="calc">
-        <div><span>${mShort(N)}の手取り${pn.ia.ok && pn.ib.ok ? '<span class="tag ok">確定</span>' : '<span class="tag est">いつもの額</span>'}</span><span class="num">${yen(pn.income)}</span></div>
+        <div><span>${mShort(N)}の手取り${pn.ia.ok && pn.ib.ok ? '<span class="tag ok">確定</span>' : ''}</span><span class="num">${yen(pn.income)}</span></div>
+        ${incLines(N, pn)}
         <div><span>固定費</span><span class="num">−${yen(pn.fixed)}</span></div>
         <div><span>貯金</span><span class="num">−${yen(pn.saving)}</span></div>
         <div><span>カード引き落とし（${mShort(M)}に使った分）</span><span class="num">−${yen(pn.bills)}</span></div>
@@ -1651,8 +1659,8 @@ function setSheetNum(key, kind, v){
   if (b) { b.querySelector('.v').textContent = kind === 'day' ? (v ? `毎月${v}日` : '未設定') : yen(v); b.classList.toggle('zero', !v); b.classList.remove('pop'); void b.offsetWidth; b.classList.add('pop'); }
 }
 
-function salarySheet(focus){
-  const M = focus ? curYM : S.month;
+function salarySheet(focus, month){
+  const M = month || (focus ? curYM : S.month);
   const doc = w => S.pays.find(p => p.month === M && p.who === w);
   const cur = w => { const p = doc(w); return p ? p.amount : 0; };
   const acc = w => { const p = doc(w); const id = p && p.account !== undefined ? p.account : S.settings.payacct[w]; return S.accounts.some(a => a.id === id) ? id : ''; };
@@ -1862,7 +1870,7 @@ document.addEventListener('click', e => {
   else if (a === 'tplname') { const i = sq(el.dataset.t); if (i) i.value = v; el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop'); }
   else if (a === 'newtx') { if (S.readonly) { toast('見るだけモードなので入力できません。上の赤いお知らせを見てね'); window.scrollTo({top: 0, behavior: 'smooth'}); return; } txSheet(); }
   else if (a === 'edittx') { const t = S.tx.find(t => t.id === el.dataset.id); if (t) txSheet(t); }
-  else if (a === 'salary') salarySheet(v === 'a' || v === 'b' ? v : null);
+  else if (a === 'salary') salarySheet(v === 'a' || v === 'b' ? v : null, el.dataset.m || null);
   else if (a === 'newcard') cardSheet();
   else if (a === 'editcard') { const c = S.cards.find(c => c.id === el.dataset.id); if (c) cardSheet(c); }
   else if (a === 'newacct') acctSheet();
