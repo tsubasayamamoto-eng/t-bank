@@ -1,5 +1,5 @@
 /**
- * T-bank データ保存用（Google スプレッドシートの「拡張機能 → Apps Script」に貼りつける）
+ * BUTASAN データ保存用（Google スプレッドシートの「拡張機能 → Apps Script」に貼りつける）
  *
  * - シート「data」に 1行 = 1データ（path / json / updatedAt）で保存します。
  * - 合言葉は「プロジェクトの設定 → スクリプト プロパティ」に PASSCODE という名前で入れてください。
