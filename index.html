@@ -1107,14 +1107,6 @@ function pigComments(){
     add('happy', `${name(w)}、${mShort(x.M)}はここまで ${yen(e.total)} かせいだよ！` + (e.goal ? (e.rem > 0 ? `目標まであと ${hm(e.need)}` : '目標たっせい🎉') : ''));
     if (e.goal && e.rem > 0 && x.M === curYM) { const p = meterPace(e, x.M);
       add(p.diff >= 0 ? 'happy' : 'normal', p.diff >= 0 ? `${name(w)}のおしごと、ペースばっちり！月末は ${yen(p.proj)} くらいになりそう` : `${name(w)}、あと ${hm(p.catchup)} 出勤するとペースに追いつくよ。ファイト！`); } });
-  // ひとりずつの目標
-  ['a','b'].forEach(w => {
-    const g = Number(S.settings.goal && S.settings.goal[w]) || 0; if (!g) return;
-    const v = sum(x.sp.list.filter(t => t.who === w), t => t.amount);
-    if (v > g) add('sad', `${name(w)}、目標の ${yen(g)} を ${yen(v - g)} こえちゃった…来月いっしょにがんばろ`);
-    else if (v > g * .8) add('normal', `${name(w)}、目標の ${yen(g)} まであと ${yen(g - v)}。ラストスパートだよ`);
-    else add('happy', `${name(w)}は目標まであと ${yen(g - v)}！いい感じ`);
-  });
   // こども
   { const kd = kidsOf(x.M); const tot = kd[0].total + kd[1].total;
     if (tot > 0) add('happy', `今月${kidName('k1')}おねえちゃんと${kidName('k2')}ちゃんにかかったのは ${yen(tot)}。すくすく育ってね`); }
@@ -1326,22 +1318,7 @@ function vHome(){
   const sa = sum(sp.list.filter(t => t.who === 'a'), t => t.amount);
   const sb = sum(sp.list.filter(t => t.who === 'b'), t => t.amount);
   const st = sa + sb;
-  const goals = S.settings.goal || {};
-  const hasGoal = Number(goals.a) > 0 || Number(goals.b) > 0;
-  const goalRow = (w, v) => {
-    const g = Number(goals[w]) || 0;
-    if (!g) return `<div class="goal"><div class="goal-h"><b><i class="dot" style="background:${whoColor(w)}"></i>${esc(name(w))}</b><span class="num">${yen(v)}</span></div>
-      <button type="button" class="goal-set" data-act="padset" data-target="set:goal.${w}" data-kind="yen" data-title="${esc(name(w))}の月の目標" data-v="">＋ 目標を決める</button></div>`;
-    const r = v / g, left = g - v;
-    return `<div class="goal"><div class="goal-h"><b><i class="dot" style="background:${whoColor(w)}"></i>${esc(name(w))}</b>
-        <span><b class="num">${yen(v)}</b><span class="goal-of"> / ${yen(g)}</span></span></div>
-      <div class="bar goal-bar"><i class="${r >= 1 ? 'over' : r > .8 ? 'warn' : ''}" style="width:${Math.min(100, r*100).toFixed(1)}%;${r <= .8 ? `background:${whoColor(w)}` : ''}"></i></div>
-      <div class="goal-s">${left >= 0 ? `あと <b class="num">${yen(left)}</b> で目標` : `目標より <b class="num">${yen(-left)}</b> オーバー`}</div></div>`;
-  };
-  const split = (hasGoal || (st > 0 && monthPlan(M).income > 0)) ? `
-    <section class="card"><h2>${esc(name('both'))}の目標</h2><div class="goals">${goalRow('a', sa)}${goalRow('b', sb)}</div>
-      <div class="note">その月にそれぞれが使ったお金（はらいかた問わず）で計算します。</div></section>`
-  : st > 0 ? `
+  const split = st > 0 ? `
     <section class="card"><h2>${esc(name('both'))}の入力</h2>
       <div class="split">
         ${sa ? `<div style="flex:${sa};background:var(--sky)">${Math.round(sa/st*100)}%</div>` : ''}
@@ -1512,8 +1489,7 @@ function vSettings(){
     <div class="grid2">
       <div class="field"><span class="lb">いつもの手取り（目安）</span>${numBtn('set:income.' + w, 'yen', `${name(w)}のいつもの手取り`, st.income[w], '¥0')}</div>
       <div class="field"><span class="lb">給料日</span>${numBtn('set:payday.' + w, 'day', `${name(w)}の給料日`, st.payday[w], '未設定')}</div>
-    </div>
-    <div class="field"><span class="lb">月に使うお金の目標</span>${numBtn('set:goal.' + w, 'yen', `${name(w)}の月の目標`, st.goal[w], '例: ¥30,000')}</div></div>`;
+    </div></div>`;
   return `
   <section class="card stack"><h2 style="margin:0">このスマホを使う人</h2>
     <div class="seg"><button type="button" class="${S.me==='a'?'on':''}" data-act="setme" data-v="a">${esc(name('a'))}</button><button type="button" class="${S.me==='b'?'on':''}" data-act="setme" data-v="b">${esc(name('b'))}</button></div>
