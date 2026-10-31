@@ -289,6 +289,24 @@ textarea.in{resize:vertical;min-height:96px;font-size:15px;line-height:1.5}
 .next-eyebrow{font-size:13px;font-weight:700;color:var(--ink2)}
 .next-big{font-size:34px;font-weight:600;color:var(--mint);line-height:1.2}
 .next-big.minus{color:var(--danger)}
+.flow{display:grid;gap:14px;margin-top:16px}
+details.fold>summary{list-style:none;cursor:pointer;-webkit-tap-highlight-color:transparent}
+details.fold>summary::-webkit-details-marker{display:none}
+.chev{display:inline-block;font-size:10px;color:var(--ink2);margin-left:6px;transition:transform .2s}
+details[open]>summary .chev{transform:rotate(180deg)}
+.fold-title{display:flex;justify-content:space-between;align-items:center}
+.fold-title h2{margin:0}
+.fold-title .chev{font-size:13px}
+.fold-body{margin-top:12px}
+.fl-h{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-weight:700;font-size:15px}
+.fl-h .num{font-size:21px;font-weight:600}
+.fl-bar{height:12px;border-radius:999px;background:var(--surface2);overflow:hidden;margin-top:6px}
+.fl-bar i{display:block;height:100%;border-radius:999px;transition:width .5s ease}
+.fl-body{display:grid;gap:9px;padding:12px 0 2px 12px;font-size:13.5px}
+.fl-row{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.fl-tap{cursor:pointer}
+.fl-note{font-size:12px;color:var(--ink2)}
+.fl-carry{display:flex;justify-content:space-between;gap:8px;font-size:13.5px;margin-top:12px;padding-top:10px;border-top:2px dashed var(--line)}
 .calc{display:grid;gap:5px;margin-top:12px;font-size:14px}
 .calc div{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
 .calc .sub{font-size:12.5px;color:var(--ink2);padding-left:14px}
@@ -517,7 +535,7 @@ const curYM = todayStr.slice(0,7);
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const S = {
-  settings: clone(DEF), works: [], fixm: [], workWho: lsGet('futari-workwho') === 'a' ? 'a' : 'b', fixed: [], cards: [], tx: [], wds: [], bills: [], pays: [], accounts: [],
+  folds: (lsGet('futari-folds') || '').split(',').filter(Boolean), settings: clone(DEF), works: [], fixm: [], workWho: lsGet('futari-workwho') === 'a' ? 'a' : 'b', fixed: [], cards: [], tx: [], wds: [], bills: [], pays: [], accounts: [],
   month: curYM, txMonths: [], tab: 'home', whoFilter: 'all',
   me: lsGet('futari-me'), local: false, readonly: false, sayIdx: 0,
 };
@@ -836,6 +854,12 @@ function rebuildSettings(){
     schedule();
   }
 }
+document.addEventListener('toggle', e => {
+  const id = e.target.dataset && e.target.dataset.fold;
+  if (!id || e.target.open === S.folds.includes(id)) return;
+  S.folds = e.target.open ? [...S.folds, id] : S.folds.filter(x => x !== id);
+  lsSet('futari-folds', S.folds.join(','));
+}, true);
 function startSubs(){
   const byAt = (a,b) => (a.at||0) - (b.at||0);
   db.collection('fixed').onSnapshot(q => { S.fixed = rows(q).sort(byAt); schedule(); }, onErr);
@@ -1149,7 +1173,7 @@ const C_NOW = '#E0527F', C_PREV = '#4F93D6', C_PAST = '#F4B3C6';
 function niceMax(v){ if (v <= 0) return 10000; const p = Math.pow(10, Math.floor(Math.log10(v))); for (const m of [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]) if (m * p >= v) return m * p; return 10 * p; }
 function man(v){ return v >= 10000 ? `${(v/10000).toFixed(v % 10000 ? 1 : 0)}万` : `${Math.round(v/1000)}千`; }
 function topRound(x, y, w, h, r){ r = Math.min(r, w/2, h); return `M${x},${y+h} V${y+r} Q${x},${y} ${x+r},${y} H${x+w-r} Q${x+w},${y} ${x+w},${y+r} V${y+h} Z`; }
-function vCharts(){
+function vCharts(extra = ''){
   const M = S.month, P = addMonth(M, -1);
   const months = [5,4,3,2,1,0].map(i => addMonth(M, -i));
   const totals = months.map(m => spentOf(m).all);
@@ -1185,8 +1209,7 @@ function vCharts(){
       <div class="cmp-diff num ${df > 0 ? 'up' : df < 0 ? 'down' : ''}">${df > 0 ? '▲' : df < 0 ? '▼' : '±'}${yen(Math.abs(df))}</div>
     </div>`;
   }).join('');
-  return `<section class="card">
-    <h2>グラフで見る</h2>
+  return foldCard('charts', 'グラフで見る', `
     <div class="ch-sum">${mShort(M)}の支出 <b class="num">${yen(totals[5])}</b>
       ${totals[4] ? `<span class="pill ${d > 0 ? 'up' : 'down'}">先月より ${d > 0 ? '▲' : '▼'}${yen(Math.abs(d))}</span>` : ''}</div>
     <div class="ch-wrap">${trend}</div>
@@ -1195,7 +1218,7 @@ function vCharts(){
       <span class="cmp-leg"><span><i style="background:${C_PREV}"></i>${mShort(P)}</span><span><i style="background:${C_NOW}"></i>${mShort(M)}</span></span></div>
     <div class="cmp">${catRows}</div>
     <div class="note">カードで使った分もふくめた、その月に使ったお金の合計です。</div>
-  </section>`;
+    ${extra}`);
 }
 
 /* ---------- onboarding ---------- */
@@ -1266,88 +1289,86 @@ function vPayday(){
   </section>`;
 }
 
+/* ▼ でひらく。ひらいた状態は再描画や開き直しでも保つ */
+function fold(id, head, body, cls = ''){
+  return `<details class="fold ${cls}" data-fold="${id}" ${S.folds.includes(id) ? 'open' : ''}><summary>${head}</summary>${body}</details>`;
+}
+function foldCard(id, title, body){
+  return `<section class="card">${fold(id, `<div class="fold-title"><h2>${title}</h2><span class="chev">▼</span></div>`, `<div class="fold-body">${body}</div>`)}</section>`;
+}
+/* 収入と支出を同じものさしの棒でならべる */
+function moneyFlow(id, ym, pl, cash){
+  const out = pl.fixed + pl.saving + pl.bills + cash;
+  const max = Math.max(pl.income, out, 1);
+  const head = (label, v, tag, color) => `<div class="fl-h"><span>${label}${tag}<span class="chev">▼</span></span><span class="num">${yen(v)}</span></div>
+    <div class="fl-bar"><i style="width:${(v / max * 100).toFixed(1)}%;background:${color}"></i></div>`;
+  const row = (l, v) => `<div class="fl-row"><span>${l}</span><span class="num">${yen(v)}</span></div>`;
+  const incTag = i => i.src === 'ok' ? '<span class="tag ok">確定</span>' : i.src === 'usual' ? '<span class="tag est">いつもの額</span>' : i.src === 'last' ? `<span class="tag est">${mShort(i.from)}と同じ</span>` : '<span class="tag est">未入力</span>';
+  const incRows = [['a', pl.ia], ['b', pl.ib]].map(([w, i]) => `<div class="fl-row fl-tap" role="button" tabindex="0" data-act="salary" data-v="${w}" data-m="${ym}"><span>${esc(name(w))}${incTag(i)}</span><span class="num">${i.src === 'none' ? '<u>入力する</u>' : yen(i.v)}</span></div>`).join('');
+  const cardRows = pl.cards.map(x => `<div class="fl-row"><span>${esc(x.c.name)}${x.ok ? '<span class="tag ok">確定</span>' : '<span class="tag est">見込み</span>'}</span><span class="num">${yen(x.v)}</span></div>`).join('');
+  const cardEst = pl.cards.some(x => !x.ok);
+  const cards = pl.cards.length ? fold(`${id}-cards`,
+    `<div class="fl-row"><span>カード引き落とし<span class="chev">▼</span></span><span class="num">${yen(pl.bills)}</span></div>`,
+    `<div class="fl-body">${cardRows}${cardEst ? `<div class="fl-note">「見込み」は${mShort(addMonth(ym, -1))}のカードのきろくから計算しています。明細の金額を入れると「確定」になります。</div>` : ''}</div>`) : '';
+  return `<div class="flow">
+    ${fold(`${id}-in`, head('収入', pl.income, pl.ia.ok && pl.ib.ok ? '' : '<span class="tag est">見込み</span>', 'var(--mint)'), `<div class="fl-body">${incRows}</div>`)}
+    ${fold(`${id}-out`, head('支出', out, '', 'var(--pink)'), `<div class="fl-body">
+      ${row('固定費', pl.fixed)}
+      ${pl.saving ? row('貯金', pl.saving) : ''}
+      ${cards}
+      ${id === 'now' ? row('現金・QR', cash) : ''}
+    </div>`)}
+  </div>`;
+}
 function vHome(){
   const M = S.month, N = addMonth(M, 1);
   const pm = monthPlan(M), pn = monthPlan(N), sp = spentOf(M);
   const left = daysLeft(M);
-  const hasPlan = pm.income > 0;
-  const remain = pm.base - sp.cash;
-  const ratio = pm.base > 0 ? sp.cash / pm.base : (sp.cash > 0 || pm.base < 0 ? 1.2 : 0);
-  const mood = !hasPlan ? 'happy' : remain <= 0 ? 'sad' : ratio > .75 ? 'normal' : 'happy';
-  const say = remain <= 0 ? '予算オーバーだよ…' : ratio > .75 ? 'ちょっとだけ節約モード' : `${mShort(M)}はあと`;
+  const outNow = pm.fixed + pm.saving + pm.bills + sp.cash;
+  const hasPlan = pm.income > 0 || outNow > 0;
+  const remain = pm.income - outNow;
+  const ratio = pm.income > 0 ? outNow / pm.income : (outNow > 0 ? 1.2 : 0);
+  const mood = remain <= 0 ? 'sad' : ratio > .9 ? 'normal' : 'happy';
   const perDay = left > 0 && remain > 0 ? Math.floor(remain / left) : 0;
-  const barCls = ratio >= 1 ? 'over' : ratio > .75 ? 'warn' : '';
-
-  const says = pigComments();
   const hero = hasPlan ? `
     <section class="card hero">
       <div class="hero-row">${pigBtn(mood)}
-        <div><div class="hero-say">${say}</div>
+        <div><div class="hero-say">${mShort(M)}のこり</div>
           <div class="hero-amt num ${remain < 0 ? 'minus' : ''}">${yen(remain)}</div>
-          <div class="hero-sub">${remain >= 0 ? '使えるよ' : 'つかいすぎ'}${left > 0 && remain > 0 ? `・のこり${left}日` : ''}</div></div>
+          ${perDay ? `<div class="hero-sub">のこり${left}日・1日 ${yen(perDay)}</div>` : ''}</div>
       </div>
-      <div class="say" role="button" tabindex="0" data-act="saynext" id="say" aria-label="ぶたさんのひとこと（タップでつぎへ）">${sayHTML(says)}</div>
-      <div class="bar"><i class="${barCls}" style="width:${Math.min(100, Math.max(0, ratio*100)).toFixed(1)}%"></i></div>
-      <div class="bar-cap"><span>現金・QRで使った <b class="num">${yen(sp.cash)}</b></span><span>使えるお金 <b class="num">${yen(pm.base)}</b></span></div>
-      <div class="stats">
-        <div class="stat"><small>1日あたり</small><span class="num">${yen(perDay)}</span></div>
-        <div class="stat"><small>${mShort(M)}のカード引落</small><span class="num">${yen(pm.bills)}</span></div>
-        <div class="stat"><small>カードで使った<br>→${mShort(N)}に引落</small><span class="num">${yen(sp.card)}</span></div>
-      </div>
+      <div class="say" role="button" tabindex="0" data-act="saynext" id="say" aria-label="ぶたさんのひとこと（タップでつぎへ）">${sayHTML(pigComments())}</div>
+      ${moneyFlow('now', M, pm, sp.cash)}
     </section>` : '';
 
   const carry = S.settings.carry && hasPlan ? remain : 0;
   const nextLeft = pn.base + carry;
-  const incTag = i => i.src === 'ok' ? '<span class="tag ok">確定</span>' : i.src === 'usual' ? '<span class="tag est">いつもの額</span>' : i.src === 'last' ? `<span class="tag est">${mShort(i.from)}と同じ</span>` : '<span class="tag est">未入力</span>';
-  const incLines = (ym, pl) => [['a', pl.ia], ['b', pl.ib]].map(([w, i]) => `<div class="sub" role="button" tabindex="0" data-act="salary" data-v="${w}" data-m="${ym}" style="cursor:pointer"><span>${esc(name(w))}${incTag(i)}</span><span class="num">${i.src === 'none' ? '<u>入力する</u>' : yen(i.v)}</span></div>`).join('');
-  const cardLines = pn.cards.map(x => `<div class="sub"><span>${esc(x.c.name)}${x.ok ? '<span class="tag ok">確定</span>' : '<span class="tag est">見込み</span>'}</span><span class="num">−${yen(x.v)}</span></div>`).join('');
   const next = hasPlan ? `
     <section class="card next">
-      <div class="next-eyebrow">カードを払ったあと、${mShort(N)}に自由に使えるお金</div>
+      <div class="next-eyebrow">${mShort(N)}の見込み・のこり</div>
       <div class="next-big num ${nextLeft < 0 ? 'minus' : ''}">${yen(nextLeft)}</div>
-      <div class="calc">
-        <div><span>${mShort(N)}の手取り${pn.ia.ok && pn.ib.ok ? '<span class="tag ok">確定</span>' : ''}</span><span class="num">${yen(pn.income)}</span></div>
-        ${incLines(N, pn)}
-        <div><span>固定費</span><span class="num">−${yen(pn.fixed)}</span></div>
-        <div><span>貯金</span><span class="num">−${yen(pn.saving)}</span></div>
-        <div><span>カード引き落とし（${mShort(M)}に使った分）</span><span class="num">−${yen(pn.bills)}</span></div>
-        ${cardLines}
-        ${S.settings.carry ? `<div><span>${mShort(M)}のくりこし</span><span class="num">${carry >= 0 ? '+' : ''}${yen(carry)}</span></div>` : ''}
-        <div class="tot"><span>${mShort(N)}のこり</span><span class="num">${yen(nextLeft)}</span></div>
-      </div>
-      <div class="note">「見込み」は${mShort(M)}のカードのきろくから計算しています。明細が届いたら、おさいふタブで金額を入れると「確定」になります。</div>
+      ${moneyFlow('next', N, pn, 0)}
+      ${S.settings.carry ? `<div class="fl-carry"><span>${mShort(M)}のくりこし</span><span class="num">${carry >= 0 ? '+' : ''}${yen(carry)}</span></div>` : ''}
     </section>` : '';
 
   const assets = vAssetsMini();
-
-  const byCat = CATS.map(k => ({...k, v: sum(sp.list.filter(t => t.cat === k.id), t => t.amount)})).filter(k => k.v > 0).sort((a,b) => b.v - a.v);
-  const maxCat = byCat.length ? byCat[0].v : 1;
-  const cats = byCat.length ? `
-    <section class="card"><h2>${mShort(M)}はなにに使った？</h2><div class="cats">
-      ${byCat.map(k => `<div class="crow"><div class="cico" style="background:${k.c}33">${k.e}</div>
-        <div><div class="cname">${k.n}</div><div class="cbar"><i style="width:${(k.v/maxCat*100).toFixed(1)}%;background:${k.c}"></i></div></div>
-        <span class="num">${yen(k.v)}</span></div>`).join('')}
-    </div></section>` : '';
 
   const sa = sum(sp.list.filter(t => t.who === 'a'), t => t.amount);
   const sb = sum(sp.list.filter(t => t.who === 'b'), t => t.amount);
   const st = sa + sb;
   const split = st > 0 ? `
-    <section class="card"><h2>${esc(name('both'))}の入力</h2>
-      <div class="split">
-        ${sa ? `<div style="flex:${sa};background:var(--sky)">${Math.round(sa/st*100)}%</div>` : ''}
-        ${sb ? `<div style="flex:${sb};background:var(--pink)">${Math.round(sb/st*100)}%</div>` : ''}
-      </div>
-      <div class="legend"><span><i class="dot" style="background:var(--sky)"></i>${esc(name('a'))} <b class="num">${yen(sa)}</b></span><span><i class="dot" style="background:var(--pink)"></i>${esc(name('b'))} <b class="num">${yen(sb)}</b></span></div>
-    </section>` : '';
+    <div class="cmp-head"><b>${esc(name('both'))}の入力</b></div>
+    <div class="split">
+      ${sa ? `<div style="flex:${sa};background:var(--sky)">${Math.round(sa/st*100)}%</div>` : ''}
+      ${sb ? `<div style="flex:${sb};background:var(--pink)">${Math.round(sb/st*100)}%</div>` : ''}
+    </div>
+    <div class="legend"><span><i class="dot" style="background:var(--sky)"></i>${esc(name('a'))} <b class="num">${yen(sa)}</b></span><span><i class="dot" style="background:var(--pink)"></i>${esc(name('b'))} <b class="num">${yen(sb)}</b></span></div>` : '';
 
   const recent = sp.list.slice(0, 5);
   const rec = `<section><h2>さいきんのきろく ${sp.list.length > 5 ? '<button type="button" class="link" data-act="tab" data-v="list">ぜんぶ見る</button>' : ''}</h2>
     ${recent.length ? `<div class="list">${recent.map(t => txRow(t, true)).join('')}</div>` : emptyList()}</section>`;
 
-  const salaryBtn = hasPlan ? `<section><button type="button" class="btn ghost" data-act="salary">💰 ${mShort(M)}の給料を入れる</button></section>` : '';
-
-  return vTodo() + vPayday() + vBillTodo() + hero + split + vWorkMini() + next + vCharts() + vKids() + assets + rec + salaryBtn;
+  return vTodo() + vPayday() + vBillTodo() + hero + next + vWorkMini() + assets + vCharts(split) + vKids() + rec;
 }
 
 function kidsOf(ym){
@@ -1373,9 +1394,9 @@ function vKids(){
       ${x.cats.length ? `<div class="kid-c">${x.cats.slice(0,3).map(c => `${c.c.e}${yen(c.v)}`).join('　')}</div>` : ''}
     </div>`;
   };
-  return `<section class="card"><h2>👧 ${esc(kidName('k1'))}・${esc(kidName('k2'))}にかかったお金 <span class="num" style="color:var(--ink)">${yen(now[0].total + now[1].total)}</span></h2>
+  return foldCard('kids', `👧 ${esc(kidName('k1'))}・${esc(kidName('k2'))} <span class="num" style="color:var(--ink)">${yen(now[0].total + now[1].total)}</span>`, `
     <div class="kids">${now.map(tile).join('')}</div>
-    <div class="note">きろくや固定費で「こどもの分」をえらぶと集計されます。「みづき・かなみ」の分は半分ずつで計算しています。</div></section>`;
+    <div class="note">きろくや固定費で「こどもの分」をえらぶと集計されます。「みづき・かなみ」の分は半分ずつで計算しています。</div>`);
 }
 function vBillTodo(){
   if (S.month !== curYM) return '';
